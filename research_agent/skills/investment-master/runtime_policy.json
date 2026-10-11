@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "skill_id": "investment-master",
+  "snapshot_commit": "e6a7bf032c05036b2d245157b9e787c3532c0897",
+  "shared_sections": ["Core Rules", "Sector And Theme Handling"],
+  "classification_sections": ["Required Workflow"],
+  "source_sections": ["Evidence Standard", "Source Priority", "Fact, Opinion, Inference, And Judgment", "Metric Discipline", "Citation Rules", "Missing Evidence"],
+  "report_source_sections": ["Final Quality Gates"],
+  "focused_heading": "研究答复",
+  "routes": {
+    "stock": {
+      "method_file": "references/stock-research.md",
+      "base_sections": ["1. Establish The Security And Research Boundary"],
+      "task_sections": {
+        "business": ["2. Understand How The Company Makes Money", "4. Test Competitive Advantage And Management"],
+        "industry": ["3. Analyze The Industry Before The Company"],
+        "financial": ["5. Test Financial Quality And Build A Driver Forecast"],
+        "risk": ["8. Define Catalysts, Risks, Invalidation, And Execution"],
+        "valuation": ["6. Value The Stock And Reverse The Market's Expectations", "7. Derive Technical Levels Carefully"]
+      },
+      "report_section": "Stock Output Contract",
+      "template_file": "references/memo-template.md",
+      "report_attachments": {"judgment": "投资结论", "metrics": "免责声明和数据来源", "traceability": "免责声明和数据来源"},
+      "capability_ids": ["web.search", "web.read", "math.calculate", "sec.resolve", "sec.disclosures", "sec.attachments"],
+      "coverage_bindings": [
+        {"task_type": "business", "method_sections": ["2. Understand How The Company Makes Money"], "report_headings": ["公司到底是怎么赚钱的"], "materials": ["evidence", "findings"]},
+        {"task_type": "business", "method_sections": ["4. Test Competitive Advantage And Management"], "report_headings": ["公司竞争力与管理质量"], "materials": ["evidence", "findings"]},
+        {"task_type": "industry", "method_sections": ["3. Analyze The Industry Before The Company"], "report_headings": ["所属行业的投资逻辑"], "materials": ["evidence", "findings"]},
+        {"task_type": "financial", "method_sections": ["5. Test Financial Quality And Build A Driver Forecast"], "report_headings": ["财务质量与盈利预测"], "materials": ["evidence", "findings", "metrics"]},
+        {"task_type": "valuation", "method_sections": ["6. Value The Stock And Reverse The Market's Expectations"], "report_headings": ["估值与预期收益"], "materials": ["evidence", "findings"], "input_from": ["financial"]},
+        {"task_type": "valuation", "method_sections": ["7. Derive Technical Levels Carefully"], "report_headings": ["投资结论", "最终购买建议与执行方案"], "materials": ["evidence", "findings"]},
+        {"task_type": "risk", "method_sections": ["8. Define Catalysts, Risks, Invalidation, And Execution"], "report_headings": ["催化剂、主要风险与逻辑失效条件", "最终购买建议与执行方案"], "materials": ["evidence", "findings"]}
+      ],
+      "subtype_parent": null,
+      "subtype_sections": {},
+      "additional_methods": {}
+    },
+    "fund": {
+      "method_file": "references/china-otc-fund-research.md",
+      "base_sections": ["Classify Before Analyzing", "Separate The Decisions", "Core Facts"],
+      "task_sections": {"fund_exposure": [], "fund_quality": ["Type-Specific Analysis", "Share-Class Comparison", "Alternative Comparison"], "fund_risk": ["Performance And Risk", "Current Timing And Entry Conditions"]},
+      "report_section": "Fund Output Contract",
+      "template_file": "references/fund-memo-template.md",
+      "report_attachments": {"judgment": "投资结论", "metrics": "收益和风险是否匹配", "traceability": "免责声明和数据来源"},
+      "capability_ids": ["web.search", "web.read", "math.calculate"],
+      "coverage_bindings": [
+        {"task_type": "fund_exposure", "method_sections": ["Core Facts"], "report_headings": ["基金到底在投什么", "基金重仓方向的投资逻辑", "为什么可能赚钱"], "materials": ["evidence", "findings"]},
+        {"task_type": "fund_quality", "method_sections": ["Type-Specific Analysis", "Share-Class Comparison", "Alternative Comparison"], "report_headings": ["基金本身是否合格", "当前价格和替代品比较"], "materials": ["evidence", "findings"]},
+        {"task_type": "fund_risk", "method_sections": ["Performance And Risk", "Current Timing And Entry Conditions"], "report_headings": ["收益和风险是否匹配", "最终购买方案"], "materials": ["evidence", "findings"]}
+      ],
+      "subtype_parent": "Type-Specific Analysis",
+      "subtype_sections": {"active": "Active Funds", "enhanced_index": "Enhanced Index Funds", "passive_index": null, "etf_feeder": null, "bond": "Bond, Mixed, And FOF Products", "mixed": "Bond, Mixed, And FOF Products", "fof": "Bond, Mixed, And FOF Products", "other": null},
+      "additional_methods": {
+        "passive_index": {"file": "references/passive-index-fund-research.md", "base_sections": ["Three-Layer Framework"], "task_sections": {"fund_exposure": ["Index Exposure"], "fund_quality": ["Vehicle Quality", "Share Classes"], "fund_risk": ["Performance And Risk", "Timing And Conditions"]}},
+        "etf_feeder": {"file": "references/passive-index-fund-research.md", "base_sections": ["Three-Layer Framework"], "task_sections": {"fund_exposure": ["Index Exposure"], "fund_quality": ["Vehicle Quality", "Share Classes"], "fund_risk": ["Performance And Risk", "Timing And Conditions"]}}
+      }
+    }
+  }
+}

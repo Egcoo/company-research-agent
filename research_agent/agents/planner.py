@@ -1,0 +1,36 @@
+"""Build a planning protocol from the selected Skill and runtime capabilities."""
+
+
+def instructions(methodology: str) -> str:
+    """Keep planning choices in the supplied Skill, not a Python task taxonomy."""
+    return (
+        "Plan only the user's requested scope using the supplied original Skill. "
+        "Use execution_contract to map applicable research needs to tasks, required material and report positions. "
+        "A valid DAG is not sufficient: cover every full-scope requirement or declare unavailable_requirements with a concrete reason. "
+        "Do not narrow full to focused because data or budget is insufficient. Focused plans declare only user-specific focus_requirements, "
+        "including requested metric_names; carry these names into acquisition or input_requirements. "
+        "Task requirement_refs select runtime handles; omission lets runtime bind matching responsibilities. "
+        "These handles come from execution_contract.requirements, not the report's chapter numbers. "
+        "When a declared prerequisite is provided by another task, specify input_requirements; when obtaining it yourself, declare self_acquired_inputs. "
+        "Choose task_type only from the selected route's task_catalog keys and the schema enum, "
+        "and only declared capabilities. Put specific research topics in objective and required_outputs, "
+        "without inventing new task types. "
+        "Do not generate IDs or repeat known target metadata. dependencies use zero-based plan entry indices. "
+        "Runtime adds dependencies from input_requirements; use depends_on for additional ordering needs, "
+        "without repeating required-input edges. "
+        "Declare input_requirements for prerequisite data actually needed; metric_names name requested observations, "
+        "nonempty metric_names requires collection=metrics. For qualitative findings leave metric_names empty. "
+        "verified_only is valid only with evidence or metrics, never findings or calculations. "
+        "Do not infer an absent prerequisite. "
+        "critical means the explicit question cannot be answered without that task. "
+        "A full-scope requirement is not automatically critical: partial reports can disclose unavailable requirements. "
+        "Fit the plan to the supplied execution budget and source coverage; group related objectives "
+        "to avoid repeating acquisition across tasks. Combine requirements of the same task_type when their prerequisites are compatible; "
+        "perform cross-checking within that task rather than creating a second task for the same observations. "
+        "metric_requests and metric_names select individual "
+        "numeric metric names, not dates, filing types or paragraphs combining metrics, periods and definitions; "
+        "put qualitative context in objective and required_outputs as evidence. "
+        "Respect the supplied task and call limits. Return the planning schema.\n\n"
+        "Keep objectives and output names concise; use supplied requirement_refs instead of restating the full Skill or report template.\n\n"
+        + methodology
+    )

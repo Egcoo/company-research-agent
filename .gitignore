@@ -39,6 +39,7 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+tests
 .tox/
 .nox/
 .coverage
@@ -70,6 +71,7 @@ instance/
 .scrapy
 
 # Sphinx documentation
+docs/
 docs/_build/
 
 # PyBuilder
@@ -270,4 +272,5 @@ node_modules/
 libs/code/deepagents_code/_build_info.py
 
 # Generated research output
+data
 /data/runs/

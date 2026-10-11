@@ -1,0 +1,27 @@
+{
+  "source_url": "https://github.com/Egcoo/investment-master",
+  "commit": "e6a7bf032c05036b2d245157b9e787c3532c0897",
+  "verified_date": "2026-10-09",
+  "snapshot_source": "installed skill; all seven rule files verified byte-for-byte against the pinned public upstream commit",
+  "hash_algorithm": "sha256",
+  "hashes": {
+    "SKILL.md": "ba10428c35ecc0920a7836ba92bc22d1f43dec89a92f3530f659844ac9651b4b",
+    "references/source-verification.md": "4cd6d3d11ecf2693f8d179246ba6f467c1a7184bcc6d22bd3fe1512c31e7a780",
+    "references/stock-research.md": "8e8101c8ae249292c964cfb9d131762a81cdec79d646c63b93ac52fcb9fdff24",
+    "references/memo-template.md": "95f3db4f24c866f1bdf92ff1737c212dd222b1b6c5aac9b1383349d97550b0bd",
+    "references/china-otc-fund-research.md": "368b36c160c5d0f92dff6d8679a107468e90da5b3ff1fc946e4e3465fa1890ce",
+    "references/fund-memo-template.md": "79c28a35b67e4d6f152c689f8594be3ad3c742b66e68c9e36ac9bf4bfd73542e",
+    "references/passive-index-fund-research.md": "c9500327a5ef89276766db8f031471d7f5bd646c9527188a2750f1431220479d",
+    "LICENSE": "9832800187f9beaca21fcbda1cc85ba47b0e262b0d561ee3b39320f4ff0772e4"
+  },
+  "file_urls": {
+    "SKILL.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/SKILL.md",
+    "references/source-verification.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/source-verification.md",
+    "references/stock-research.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/stock-research.md",
+    "references/memo-template.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/memo-template.md",
+    "references/china-otc-fund-research.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/china-otc-fund-research.md",
+    "references/fund-memo-template.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/fund-memo-template.md",
+    "references/passive-index-fund-research.md": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/investment-master/references/passive-index-fund-research.md",
+    "LICENSE": "https://github.com/Egcoo/investment-master/blob/e6a7bf032c05036b2d245157b9e787c3532c0897/LICENSE"
+  }
+}
