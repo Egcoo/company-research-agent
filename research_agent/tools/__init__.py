@@ -1,11 +1,5 @@
-"""Expose source capabilities independently of research responsibilities."""
+"""Expose the MVP's basic search contracts and client."""
 
-from research_agent.tools.web import (
-    SearchHit,
-    SearchResults,
-    WebSearch,
-    tavily_search,
-    think_tool,
-)
+from research_agent.tools.web import SearchHit, SearchResults, WebSearch
 
-__all__ = ["SearchHit", "SearchResults", "WebSearch", "tavily_search", "think_tool"]
+__all__ = ["SearchHit", "SearchResults", "WebSearch"]

@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "provenance": "All source bodies, financial figures, filing identities and model responses are synthetic offline fixtures. Company identifiers are used solely for routing tests. These cases are not real company research or a factual-accuracy benchmark.",
+  "cases": [
+    {"id": "S01", "question": "Run synthetic NVIDIA latest-quarter research end to end.", "company": "NVDA", "as_of": "2025-08-31", "expected_checks": ["company_identity", "validated_plan", "financial_and_web_workers", "workflow_success"]},
+    {"id": "S02", "question": "Exclude synthetic Apple sources published after the research cutoff.", "company": "AAPL", "as_of": "2025-08-31", "expected_checks": ["filing_cutoff", "web_publication_cutoff", "workflow_success"]},
+    {"id": "S03", "question": "Keep synthetic Microsoft annual figures distinct from missing fourth-quarter data.", "company": "MSFT", "as_of": "2025-08-31", "expected_checks": ["explicit_annual_context", "quarterly_evidence_gap", "partial_report", "no_semantic_verification_claim"]},
+    {"id": "S04", "question": "Reject an ambiguous synthetic Apple company name.", "company": "AAPL", "as_of": "2025-08-31", "expected_checks": ["ambiguous_company_error", "no_wrong_company_research"]},
+    {"id": "S05", "question": "Read the necessary synthetic NVIDIA earnings exhibit rather than citing only filing metadata.", "company": "NVDA", "as_of": "2025-08-31", "expected_checks": ["earnings_attachment_download", "actual_excerpt_registered", "citation_existence"]},
+    {"id": "S06", "question": "Report missing recent filings and a failed synthetic source download without historical ingestion.", "company": "NVDA", "as_of": "2025-08-31", "expected_checks": ["coverage_gap", "source_failure", "no_evidence", "no_history_requests", "failed_report"]},
+    {"id": "S07", "question": "Deduplicate repeated synthetic source URLs while preserving valid citations.", "company": "NVDA", "as_of": "2025-08-31", "expected_checks": ["source_deduplication", "registered_excerpt", "single_source_citation"]},
+    {"id": "S08", "question": "Reject a report referencing a fabricated evidence identifier.", "company": "NVDA", "as_of": "2025-08-31", "expected_checks": ["unknown_evidence_error", "no_accepted_report"]}
+  ]
+}

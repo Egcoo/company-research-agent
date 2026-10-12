@@ -5,6 +5,7 @@ import re
 import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
@@ -14,7 +15,6 @@ from bs4 import BeautifulSoup
 from langchain_core.tools import StructuredTool
 
 from research_agent.config import ConfigurationError, ResearchError
-from research_agent.evidence import _arithmetic
 from research_agent.tools.research import discover_recent_sec_sources
 from research_agent.tools.sec import SecClient, _validate_url
 from research_agent.tools.source_dates import source_dates
@@ -37,6 +37,37 @@ _ERROR_MESSAGES = {
     "unsafe_url": "Use a public HTTP(S) URL without embedded credentials.",
     "unsupported_content_type": "This source format is unsupported; seek readable HTML or record a gap.",
 }
+
+
+def _arithmetic(
+    operation: Literal["add", "subtract", "multiply", "divide"],
+    values: list[Decimal | str | int],
+) -> tuple[list[Decimal], Decimal]:
+    """Evaluate a bounded operation with finite Decimal operands."""
+    try:
+        operands = [Decimal(str(value)) for value in values]
+        if not 2 <= len(operands) <= 20 or any(
+            not value.is_finite() for value in operands
+        ):
+            raise ValueError("Invalid operands")
+        result = operands[0]
+        for value in operands[1:]:
+            if operation == "add":
+                result += value
+            elif operation == "subtract":
+                result -= value
+            elif operation == "multiply":
+                result *= value
+            elif operation == "divide":
+                result /= value
+            else:
+                raise ValueError("Unsupported operation")
+        return operands, result
+    except (InvalidOperation, ArithmeticError, ValueError):
+        raise ResearchError(
+            "invalid_calculation",
+            "Calculation requires finite inputs and a supported operation without division by zero.",
+        ) from None
 
 
 class MvpTools:

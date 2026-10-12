@@ -8,7 +8,6 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import requests
-from langchain_core.tools import tool
 from pydantic import Field, ValidationError
 from tavily import TavilyClient
 from tavily.errors import TimeoutError as TavilyTimeoutError
@@ -179,42 +178,3 @@ class WebSearch:
         return SearchResults(
             results=results, status="ok" if results else "empty", truncated=truncated
         )
-
-
-@tool(parse_docstring=True)
-def tavily_search(
-    query: str,
-    max_results: int = 1,
-    topic: Literal["general", "news", "finance"] = "general",
-) -> dict:
-    """Discover bounded search results for the upstream notebook.
-
-    Args:
-        query: Search query to execute.
-        max_results: Maximum result count between one and ten.
-        topic: General, news or finance discovery topic.
-
-    Returns:
-        Structured URL discovery results; snippets are not fetched evidence.
-    """
-    settings = Settings.from_env().model_copy(
-        update={"max_search_results": max(1, min(max_results, 10))}
-    )
-    search = WebSearch(settings, ResearchBudget(settings))
-    try:
-        return search.search(query, topic).model_dump(mode="json")
-    finally:
-        search.close()
-
-
-@tool(parse_docstring=True)
-def think_tool(reflection: str) -> str:
-    """Record bounded reflection for the upstream notebook.
-
-    Args:
-        reflection: Research gaps and the next concrete action.
-
-    Returns:
-        A bounded reflection acknowledgement.
-    """
-    return f"Reflection recorded: {reflection[:2000]}"

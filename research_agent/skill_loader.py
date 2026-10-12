@@ -136,7 +136,7 @@ def load_adapter() -> ExecutionAdapter:
             raise ConfigurationError(
                 "Adapter does not match the fixed Skill snapshot or its V2 target routes."
             )
-        from research_agent.tools.research import CAPABILITY_METHODS
+        from research_agent.tools.research import CAPABILITY_IDS
 
         main = _read(root, manifest, "SKILL.md")
         _sections(main, adapter.shared_sections + adapter.classification_sections)
@@ -145,7 +145,7 @@ def load_adapter() -> ExecutionAdapter:
             adapter.source_sections + adapter.report_source_sections,
         )
         for route in adapter.routes.values():
-            if set(route.capability_ids) - set(CAPABILITY_METHODS):
+            if set(route.capability_ids) - CAPABILITY_IDS:
                 raise ConfigurationError(
                     "Adapter references an unregistered capability."
                 )
@@ -216,16 +216,6 @@ def load_adapter() -> ExecutionAdapter:
         raise ConfigurationError(
             "The fixed Skill execution adapter is missing or invalid."
         ) from None
-
-
-def classification_material(adapter):
-    """Return original routing instructions without selecting another Skill."""
-    root = _root()
-    manifest_data = root.joinpath("manifest.json").read_bytes()
-    if adapter.manifest_hash != hashlib.sha256(manifest_data).hexdigest():
-        raise ConfigurationError("Skill snapshot manifest changed during the run.")
-    manifest = json.loads(manifest_data)
-    return _sections(_read(root, manifest, "SKILL.md"), adapter.classification_sections)
 
 
 def load_skill(
@@ -358,19 +348,3 @@ def load_skill(
             for index, binding in enumerate(route.coverage_bindings)
         ],
     )
-
-
-def execution_contract(bundle, query, scope):
-    """Bind the requested boundary without creating a second research policy."""
-    return {
-        "skill_id": bundle.skill_id,
-        "adapter_hash": bundle.adapter_hash,
-        "query": query,
-        "scope": scope,
-        "target_route": bundle.kind,
-        "requirements": bundle.requirements if scope == "full" else [],
-        "report_headings": bundle.report_headings or [bundle.focused_heading],
-        "plan_gaps": [],
-        "scope_preserved": True,
-        "validation_scope": "registered_material_and_declared_coverage; semantics_not_proven",
-    }

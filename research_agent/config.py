@@ -27,9 +27,6 @@ class Settings(BaseModel):
     """Hold one research run's configuration and resource limits."""
 
     model: str = "anthropic:claude-sonnet-4-5-20250929"
-    max_concurrent_tasks: int = Field(default=3, ge=1, le=4)
-    max_tasks: int = Field(default=8, ge=1, le=16)
-    max_report_sections: int = Field(default=24, ge=1, le=64)
     anthropic_api_key: SecretStr | None = Field(default=None, repr=False, exclude=True)
     tavily_api_key: SecretStr | None = Field(default=None, repr=False, exclude=True)
     langsmith_api_key: SecretStr | None = Field(default=None, repr=False, exclude=True)
@@ -54,7 +51,6 @@ class Settings(BaseModel):
         """Read supported variables without opening .env or constructing clients."""
         values = os.environ if environ is None else environ
         return cls(
-            max_concurrent_tasks=values.get("DEEP_EQUITY_MAX_CONCURRENT_TASKS", 3),
             model=values.get("DEEP_EQUITY_MODEL", cls.model_fields["model"].default),
             anthropic_api_key=values.get("ANTHROPIC_API_KEY") or None,
             tavily_api_key=values.get("TAVILY_API_KEY") or None,

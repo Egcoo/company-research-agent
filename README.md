@@ -54,12 +54,12 @@ uv sync --locked
 运行一次 NVIDIA 完整研究：
 
 ```powershell
-uv run --locked deepequity "完整研究 NVIDIA 的基本面与投资情况" --execution-path mvp --ticker NVDA --target-type stock --market US --scope full --env-file .env
+uv run --locked deepequity "完整研究 NVIDIA 的基本面与投资情况" --ticker NVDA --target-type stock --market US --scope full --env-file .env
 ```
 
 - 将 `NVDA` 和问题中的公司名改为 `AAPL` / Apple，即可研究 Apple。
 - `--as-of YYYY-MM-DD` 指定信息截止日期，默认当天；`--output-dir` 指定输出根目录。
-- **必须显式传入 `--execution-path mvp`**：CLI 当前默认值仍为旧的 `skill` 路径。
+- MVP 是默认且唯一执行路径；现有 `--execution-path mvp` 参数仍可使用。
 - 只有显式指定 `--env-file` 才会读取本地环境文件，已有进程环境变量优先。真实运行会调用外部服务，可能产生模型/API 费用。
 
 默认上限为 300 秒、30 次模型调用、30 次 HTTP/搜索请求和 50 次工具调用，可通过 `.env.example` 中对应的 `DEEP_EQUITY_*` 配置调整。调用次数上限不是金额预算。
@@ -99,7 +99,7 @@ data/runs/mvp/<run_id>/
 
 当前限制：
 
-- MVP 仅支持显式 ticker 的美股 `stock + full`；基金和 focused 问题属于保留的旧路径。
+- MVP 仅支持显式 ticker 的美股 `stock + full`；基金和 focused 问题暂不支持。
 - PDF/OCR、需要 JavaScript 的网页和受访问限制的来源可能无法读取。行情依赖可读网页，尚无独立行情接口或完整历史数据库。
 - URL 检查只能证明链接来自已读页面，不能证明每个结论得到正文支持，或网页内容在截止日期前已知。
 - 数字单位和期间只做粗略提示；不自动验证 DCF、预测模型或所有事实。重要缺口应在报告中保留，仍需人工复核。
@@ -115,6 +115,6 @@ uv sync --locked --extra dev
 uv run --locked --extra dev pytest -q tests/test_mvp.py tests/test_mvp_tools.py tests/test_mvp_deadline.py
 ```
 
-这些测试验证执行、保存、引用边界和时限，不代表真实投资报告准确率。旧结构化流程及 `examples/` 中的两个回放/对照脚本仍保留，MVP 不调用它们。
+这些测试验证执行、保存、引用边界和时限，不代表真实投资报告准确率。旧结构化工作流、Studio/Notebook 入口和回放脚本已从活动代码中移除。
 
 项目源自 DeepAgents Deep Research scaffold，来源说明见 [UPSTREAM.md](UPSTREAM.md)；内置 Investment Master 快照与许可位于 [research_agent/skills/investment-master/](research_agent/skills/investment-master/)。

@@ -4,7 +4,6 @@ import logging
 import re
 import threading
 import time
-from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -68,47 +67,6 @@ def _validate_url(url: str, expected: str, *, directory: bool = False) -> None:
             "unsafe_sec_url",
             "SEC document must belong to the expected accession directory.",
         )
-
-
-class _IndexParser(HTMLParser):
-    """Read document rows without executing or loading filing-index content."""
-
-    def __init__(self) -> None:
-        """Initialize the current row and its document links."""
-        super().__init__(convert_charrefs=True)
-        self.rows: list[tuple[list[str], list[str]]] = []
-        self.cells: list[str] | None = None
-        self.links: list[str] = []
-        self.text_parts: list[str] | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Collect cells and document links from each table row."""
-        if tag == "tr":
-            self.cells, self.links = [], []
-        elif tag in {"td", "th"} and self.cells is not None:
-            self.text_parts = []
-        elif tag == "a" and self.cells is not None:
-            href = dict(attrs).get("href")
-            if href:
-                self.links.append(href)
-
-    def handle_data(self, data: str) -> None:
-        """Retain text only while reading a table cell."""
-        if self.text_parts is not None:
-            self.text_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        """Complete each cell and row independently."""
-        if (
-            tag in {"td", "th"}
-            and self.text_parts is not None
-            and self.cells is not None
-        ):
-            self.cells.append(" ".join("".join(self.text_parts).split()))
-            self.text_parts = None
-        elif tag == "tr" and self.cells is not None:
-            self.rows.append((self.cells, self.links))
-            self.cells, self.text_parts = None, None
 
 
 class SecClient:
