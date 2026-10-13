@@ -46,6 +46,8 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("researc
     assert {
         "research_agent.runner",
         "research_agent.mvp",
+        "research_agent.agent.research",
+        "research_agent.agent.synthesis",
         "research_agent.tools.mvp",
     } <= modules
     assert not RETIRED & modules

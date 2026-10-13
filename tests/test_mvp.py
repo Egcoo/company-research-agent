@@ -134,7 +134,9 @@ def test_unread_citation_is_repaired_once_without_losing_original_draft(mvp_case
     result = run.run()
     assert result["status"] == "generated" and model.i == 5
     assert "not-read" in (run.directory / "report.draft.md").read_text(encoding="utf-8")
-    assert "not-read" not in (run.directory / "2026-10-13-GOOG.md").read_text(encoding="utf-8")
+    assert "not-read" not in (run.directory / "2026-10-13-GOOG.md").read_text(
+        encoding="utf-8"
+    )
     assert (run.directory / "notes.md").exists()
 
 
@@ -165,6 +167,34 @@ def test_report_stream_failure_keeps_the_received_markdown(mvp_case, monkeypatch
     assert "private-provider-error" not in (run.directory / "result.json").read_text(
         encoding="utf-8"
     )
+
+
+def test_research_failure_reaches_synthesis_with_saved_materials_and_shared_budget(
+    mvp_case,
+):
+    def interrupted_research(messages):
+        raise RuntimeError("private research transport details")
+
+    def write_report(messages):
+        packet = json.loads(messages[1].content)
+        assert packet["read_sources"][0]["url"] == URL
+        assert "USD 100 million" in packet["notes"]
+        assert packet["research_errors"][0]["stage"] == "research"
+        assert packet["research_errors"][0]["code"] == "local_error"
+        assert "private research transport details" not in messages[1].content
+        return AIMessage(content=report())
+
+    run, model, requests = mvp_case(
+        [*read_and_note()[:2], interrupted_research, write_report]
+    )
+    result = run.run()
+
+    assert result["status"] == "generated" and result["report_written"]
+    assert result["calls"] == {"request": 1, "tool": 2, "model": 4}
+    assert model.i == 4 and requests == [URL]
+    assert len(result["errors"]) == 1 and result["errors"][0]["stage"] == "research"
+    assert (run.directory / "sources.jsonl").exists()
+    assert (run.directory / "report.draft.md").exists()
 
 
 def test_basic_checks_reject_empty_sections_and_unread_urls_without_semantic_scoring():

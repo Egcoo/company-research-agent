@@ -15,7 +15,7 @@ DeepEquity 是一个以 **Investment Master 为研究规范**的上市公司研�
 runner.py -> Skill Loader -> Investment Master 股票研究规则
                 |
                 v
-一个 Research Agent：规划、取材、分析、按需计算
+一个 Research Agent（agent/research.py）：规划、取材、分析、按需计算
                 |
                 +<-> Tools：SEC 发现 / 搜索 / 阅读 / 计算 / 保存笔记
                 |
@@ -23,13 +23,13 @@ runner.py -> Skill Loader -> Investment Master 股票研究规则
 已读来源 + Markdown 研究笔记
                 |
                 v
-Report Synthesis：直接生成 Markdown
+Report Synthesis（agent/synthesis.py）：直接生成 Markdown
                 |
                 v
-Lightweight Check：九章、非空、引用来自已读 URL
+Lightweight Check（runtime/reporting.py）：九章、非空、引用来自已读 URL
                 |
                 v
-report.md
+Markdown 投资研究报告
 ```
 
 商业模式、行业、竞争与管理、财务预测、估值、风险和执行条件，由同一个 Research Agent 按 Skill 开展。规划在这个 Agent 内完成；报告合成是后续的模型调用。
@@ -70,7 +70,7 @@ uv run --locked deepequity "完整研究 NVIDIA 的基本面与投资情况" --t
 
 ```text
 data/runs/mvp/<run_id>/
-+-- report.md          # 基本检查通过后的最终报告
++-- 2026-10-13-GOOG.md # 当前代码固定的最终报告名，基本检查通过后生成
 +-- report.draft.md    # 流式保存的初稿
 +-- report.repair.md   # 需要修复时生成，最多一次
 +-- sources.jsonl      # 实际返回给模型的来源文本、URL 和日期
@@ -108,11 +108,21 @@ data/runs/mvp/<run_id>/
 
 ## 代码与离线验证
 
-主要入口：[runner.py](research_agent/runner.py)；研究、合成与运行协调：[mvp.py](research_agent/mvp.py)；报告整理与检查：[runtime/reporting.py](research_agent/runtime/reporting.py)；进程监督：[runtime/supervisor.py](research_agent/runtime/supervisor.py)；研究工具：[tools/mvp.py](research_agent/tools/mvp.py)；规则加载：[skill_loader.py](research_agent/skill_loader.py)。
+| 文件 | 职责 |
+| --- | --- |
+| [runner.py](research_agent/runner.py) | 解析 CLI，启动 MVP |
+| [mvp.py](research_agent/mvp.py) | 加载 Skill、初始化模型和工具、协调两个阶段，统一管理预算、错误及运行记录 |
+| [agent/research.py](research_agent/agent/research.py) | 按 Skill 规划、调用研究工具、分析，并通过回调持续保存笔记 |
+| [agent/synthesis.py](research_agent/agent/synthesis.py) | 使用笔记、实际读取的来源和研究错误，流式生成报告，执行基本检查及最多一次修复 |
+| [runtime/reporting.py](research_agent/runtime/reporting.py) | 整理 Markdown、检查章节和引用、生成来源列表 |
+| [runtime/supervisor.py](research_agent/runtime/supervisor.py) | 监督 Worker 进程和总时限 |
+| [tools/mvp.py](research_agent/tools/mvp.py) / [skill_loader.py](research_agent/skill_loader.py) | 提供五个研究工具 / 加载研究规则 |
+
+研究与合成共享同一次运行的模型和预算。两个阶段通过明确参数接收材料，通过回调请求模型调用额度、记录响应及保存诊断；运行协调器负责处理异常和关闭客户端。当前代码仍固定使用上面的最终报告文件名，本次拆分保持原有命名方式。
 
 ```powershell
 uv sync --locked --extra dev
-uv run --locked --extra dev pytest -q tests/test_mvp.py tests/test_mvp_tools.py tests/test_mvp_deadline.py
+uv run --locked --extra dev pytest -q tests/test_agent_stages.py tests/test_mvp.py tests/test_mvp_tools.py tests/test_mvp_deadline.py
 ```
 
 这些测试验证执行、保存、引用边界和时限，不代表真实投资报告准确率。旧结构化工作流、Studio/Notebook 入口和回放脚本已从活动代码中移除。
