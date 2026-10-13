@@ -12,7 +12,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 
 from research_agent import runner
 from research_agent.config import ResearchBudget, Settings
-from research_agent.mvp import MvpRun, check_report, normalize_markdown
+from research_agent.mvp import MvpRun
+from research_agent.runtime.reporting import check_report, normalize_markdown
 from research_agent.skill_loader import load_skill
 from research_agent.tools.webpage import HttpFetcher
 
@@ -111,7 +112,7 @@ def test_plain_plan_continues_to_sources_and_markdown_without_old_ledger(mvp_cas
     assert "Plan:" in (run.directory / "notes.md").read_text(encoding="utf-8")
     source = json.loads((run.directory / "sources.jsonl").read_text(encoding="utf-8"))
     assert "USD 100 million" in source["text"]
-    output = (run.directory / "report.md").read_text(encoding="utf-8")
+    output = (run.directory / "2026-10-13-GOOG.md").read_text(encoding="utf-8")
     assert output.count("\n## ") == 9 and "本次实际读取的来源" in output
     assert not (run.directory / "sources").exists()
     assert not (run.directory / "evidence.json").exists()
@@ -133,7 +134,7 @@ def test_unread_citation_is_repaired_once_without_losing_original_draft(mvp_case
     result = run.run()
     assert result["status"] == "generated" and model.i == 5
     assert "not-read" in (run.directory / "report.draft.md").read_text(encoding="utf-8")
-    assert "not-read" not in (run.directory / "report.md").read_text(encoding="utf-8")
+    assert "not-read" not in (run.directory / "2026-10-13-GOOG.md").read_text(encoding="utf-8")
     assert (run.directory / "notes.md").exists()
 
 

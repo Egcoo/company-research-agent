@@ -38,7 +38,7 @@ def _cleanup_recorded_processes(directory: Path) -> None:
 
 
 def test_supervisor_returns_completed_result_without_rewriting_it(tmp_path):
-    from research_agent.mvp import supervise_process
+    from research_agent.runtime.supervisor import supervise_process
 
     expected = {
         "status": "partial",
@@ -71,7 +71,7 @@ def test_supervisor_returns_completed_result_without_rewriting_it(tmp_path):
 
 
 def test_supervisor_terminates_hung_worker_without_draft_as_failed(tmp_path):
-    from research_agent.mvp import supervise_process
+    from research_agent.runtime.supervisor import supervise_process
 
     command = _script(
         tmp_path,
@@ -110,7 +110,7 @@ def test_supervisor_terminates_hung_worker_without_draft_as_failed(tmp_path):
 
 
 def test_supervisor_kills_descendants_and_retains_saved_research_and_draft(tmp_path):
-    from research_agent.mvp import supervise_process
+    from research_agent.runtime.supervisor import supervise_process
 
     saved = {
         "notes.md": "# Research notes\nObserved revenue, explicit valuation gap.\n",

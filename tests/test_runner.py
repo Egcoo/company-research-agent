@@ -135,7 +135,7 @@ def test_cli_missing_credentials_preserves_failed_mvp_run(tmp_path, capfd, monke
     assert "ANTHROPIC_API_KEY" in output["errors"][0]["message"]
     assert output["calls"] == {"request": 0, "tool": 0, "model": 0}
     directory = Path(output["output_dir"])
-    assert not (directory / "report.md").exists()
+    assert not (directory / "2026-10-13-GOOG.md").exists()
     inputs = json.loads((directory / "inputs.json").read_text(encoding="utf-8"))
     assert inputs["ticker"] == "AAPL" and inputs["scope"] == "full"
     assert "anthropic_api_key" not in inputs["settings"]

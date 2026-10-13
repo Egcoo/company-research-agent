@@ -1,17 +1,11 @@
 """Run one stock researcher and write Markdown without a structured research ledger."""
 
 import argparse
-import html
 import json
-import os
-import re
-import signal
-import subprocess
 import sys
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from anthropic import APIConnectionError
@@ -26,6 +20,24 @@ from research_agent.config import (
     Settings,
 )
 from research_agent.model_errors import _model_connection_error
+from research_agent.runtime import _write_json
+from research_agent.runtime.reporting import (
+    _citation_targets as _citation_targets,
+)
+from research_agent.runtime.reporting import (
+    _source_list,
+    check_report,
+    normalize_markdown,
+)
+from research_agent.runtime.reporting import (
+    canonical_url as canonical_url,
+)
+from research_agent.runtime.supervisor import (
+    _stop_process_tree as _stop_process_tree,
+)
+from research_agent.runtime.supervisor import (
+    supervise_process as supervise_process,
+)
 from research_agent.skill_loader import load_skill
 from research_agent.tools.mvp import MvpTools
 from research_agent.tools.web import WebSearch
@@ -34,14 +46,6 @@ from research_agent.tools.webpage import HttpFetcher
 
 def _now():
     return datetime.now(UTC).isoformat()
-
-
-def _write_json(path, value):
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    temporary.replace(path)
 
 
 def _text(message):
@@ -53,142 +57,6 @@ def _text(message):
         for block in content
         if isinstance(block, dict) and block.get("type") == "text"
     )
-
-
-def canonical_url(value):
-    """Normalize link syntax and verified aliases without guessing other pages."""
-    value = html.unescape(value.strip().strip("<>"))
-    parsed = urlsplit(value)
-    return urlunsplit(
-        (
-            parsed.scheme.lower(),
-            parsed.netloc.lower(),
-            parsed.path or "/",
-            parsed.query,
-            "",
-        )
-    )
-
-
-def _citation_targets(markdown):
-    """Collect Markdown and HTML links without truncating balanced URL parentheses."""
-    targets = []
-    masked = list(markdown)
-    for match in re.finditer(r"\]\(\s*", markdown):
-        start = cursor = match.end()
-        if cursor < len(markdown) and markdown[cursor] == "<":
-            start += 1
-            cursor = markdown.find(">", start)
-            if cursor < 0:
-                continue
-        else:
-            depth = 0
-            while cursor < len(markdown):
-                character = markdown[cursor]
-                if character.isspace() or character == ")" and depth == 0:
-                    break
-                if character == "(":
-                    depth += 1
-                elif character == ")":
-                    depth -= 1
-                cursor += 1
-        targets.append(markdown[start:cursor])
-        masked[start:cursor] = " " * (cursor - start)
-    targets += re.findall(
-        r"(?:https?:)?//[^\s<>\"'\[\]，。、；（）]+", "".join(masked), re.I
-    )
-    targets += re.findall(r"(?m)^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)", markdown)
-    for match in re.finditer(
-        r"\b(?:href|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", markdown, re.I
-    ):
-        targets.append(next(value for value in match.groups() if value is not None))
-    clean = set()
-    for target in targets:
-        target = target.strip().strip("<>").rstrip("。，；,;")
-        while target.endswith(")") and target.count(")") > target.count("("):
-            target = target[:-1]
-        if not target.startswith("#"):
-            clean.add(target)
-    return clean
-
-
-def normalize_markdown(markdown, headings):
-    """Normalize only the enclosing fence and known report headings."""
-    markdown = markdown.strip()
-    if re.match(r"^```(?:markdown|md)?\s*\n", markdown) and markdown.endswith("```"):
-        markdown = markdown.split("\n", 1)[1][:-3].strip()
-    for index, heading in enumerate(headings, 1):
-        pattern = rf"(?m)^\s{{0,3}}#{{1,3}}\s*(?:\d+[.．、:：]\s*)?{re.escape(heading)}\s*#*\s*$"
-        markdown = re.sub(pattern, f"## {index}. {heading}", markdown)
-    return markdown + "\n" if markdown else ""
-
-
-def check_report(markdown, headings, allowed_urls):
-    """Check delivery structure and read URLs, leaving content quality to acceptance."""
-    errors, warnings = [], []
-    if not markdown.strip():
-        errors.append("report_empty")
-    matches = list(re.finditer(r"(?m)^##\s+(.+)$", markdown))
-    found = {
-        match.group(1).strip(): (position, match)
-        for position, match in enumerate(matches)
-    }
-    positions = []
-    for index, heading in enumerate(headings, 1):
-        name = f"{index}. {heading}"
-        if name not in found:
-            errors.append(f"section_missing:{name}")
-            continue
-        position, match = found[name]
-        positions.append(position)
-        end = (
-            matches[position + 1].start()
-            if position + 1 < len(matches)
-            else len(markdown)
-        )
-        body = markdown[match.end() : end].strip()
-        if not body:
-            errors.append(f"section_empty:{name}")
-        if index in {5, 6} and re.search(r"\d", body):
-            if not re.search(
-                r"USD|CNY|美元|人民币|百万|十亿|亿元|%|％|股|倍|元", body, re.I
-            ):
-                warnings.append(f"number_unit_review:{name}")
-            if not re.search(r"20\d{2}|FY|LTM|TTM|截至|季度|财年", body, re.I):
-                warnings.append(f"number_period_review:{name}")
-    if positions != sorted(positions) or len(matches) != len(headings):
-        errors.append("section_order_or_count")
-    allowed = {canonical_url(url) for url in allowed_urls}
-    unknown = [
-        url for url in _citation_targets(markdown) if canonical_url(url) not in allowed
-    ]
-    if unknown:
-        errors.append("unread_citation")
-    return {
-        "errors": list(dict.fromkeys(errors)),
-        "warnings": warnings,
-        "unread_urls": sorted(set(unknown)),
-    }
-
-
-def _source_list(sources):
-    lines = ["### 本次实际读取的来源", ""]
-    seen = set()
-    for item in sources:
-        url = item["url"]
-        if url in seen:
-            continue
-        seen.add(url)
-        title = (
-            str(item["title"])
-            .replace("[", "\\[")
-            .replace("]", "\\]")
-            .replace("\n", " ")
-        )
-        lines.append(
-            f"- [{title}](<{url}>)；发布日期：{item.get('published_at') or '未确认'}；读取日期：{item['retrieved_at'][:10]}。"
-        )
-    return "\n".join(lines) + "\n"
 
 
 class MvpRun:
@@ -521,7 +389,7 @@ class MvpRun:
                 report = (
                     report.rstrip() + "\n\n" + _source_list(self.source_tools.sources)
                 )
-                (self.directory / "report.md").write_text(report, encoding="utf-8")
+                (self.directory / "2026-10-13-GOOG.md").write_text(report, encoding="utf-8")
                 return checks
             if attempt == 0:
                 messages.append(
@@ -568,7 +436,7 @@ class MvpRun:
             result.update(
                 status="generated" if not checks["errors"] else "partial",
                 checks=checks,
-                report_written=(self.directory / "report.md").exists(),
+                report_written=(self.directory / "2026-10-13-GOOG.md").exists(),
             )
         except Exception as error:
             self._failure("delivery", error)
@@ -589,82 +457,6 @@ class MvpRun:
             self.fetcher.close()
             self.search.close()
         return result
-
-
-def _stop_process_tree(process):
-    """Stop the owned worker and descendants without waiting for SDK cleanup."""
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=0.6,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            process.kill()
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    try:
-        process.wait(timeout=0.2)
-    except subprocess.TimeoutExpired:
-        process.kill()
-
-
-def supervise_process(command, directory, deadline_seconds):
-    """Enforce an absolute wall-clock limit on the complete worker process tree."""
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
-    cleanup = min(2.0, deadline_seconds / 4)
-    deadline = started + max(0.05, deadline_seconds - cleanup)
-    with (directory / "worker.log").open("w", encoding="utf-8") as log:
-        process = subprocess.Popen(
-            command,
-            stdout=log,
-            stderr=log,
-            cwd=Path(__file__).resolve().parents[1],
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            start_new_session=os.name != "nt",
-        )
-        expired = False
-        try:
-            while process.poll() is None:
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    expired = True
-                    _stop_process_tree(process)
-                    break
-                time.sleep(min(0.05, left))
-        finally:
-            if process.poll() is None:
-                _stop_process_tree(process)
-    result_path = directory / "result.json"
-    if not expired and result_path.exists():
-        return json.loads(result_path.read_text(encoding="utf-8"))
-    previous = {}
-    if result_path.exists():
-        previous = json.loads(result_path.read_text(encoding="utf-8"))
-    result = {
-        **previous,
-        "execution_path": "mvp",
-        "run_id": directory.name,
-        "status": "partial" if (directory / "report.draft.md").exists() else "failed",
-        "report_written": (directory / "report.md").exists(),
-        "quality_accepted": None,
-        "error": {
-            "code": "hard_deadline_exceeded" if expired else "worker_failed",
-            "message": "The worker stopped; saved sources, notes and drafts were retained.",
-        },
-        "latency_seconds": round(time.monotonic() - started, 3),
-        "output_dir": str(directory),
-    }
-    _write_json(result_path, result)
-    return result
 
 
 def run_mvp(settings, *, query, ticker, as_of, output_dir):

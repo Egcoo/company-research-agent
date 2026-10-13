@@ -108,7 +108,7 @@ data/runs/mvp/<run_id>/
 
 ## 代码与离线验证
 
-主要入口：[runner.py](research_agent/runner.py)；执行与报告：[mvp.py](research_agent/mvp.py)；研究工具：[tools/mvp.py](research_agent/tools/mvp.py)；规则加载：[skill_loader.py](research_agent/skill_loader.py)。
+主要入口：[runner.py](research_agent/runner.py)；研究、合成与运行协调：[mvp.py](research_agent/mvp.py)；报告整理与检查：[runtime/reporting.py](research_agent/runtime/reporting.py)；进程监督：[runtime/supervisor.py](research_agent/runtime/supervisor.py)；研究工具：[tools/mvp.py](research_agent/tools/mvp.py)；规则加载：[skill_loader.py](research_agent/skill_loader.py)。
 
 ```powershell
 uv sync --locked --extra dev
