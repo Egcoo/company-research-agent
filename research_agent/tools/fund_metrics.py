@@ -2,6 +2,7 @@
 
 import math
 from bisect import bisect_right
+from calendar import monthrange
 from datetime import date
 from statistics import stdev
 
@@ -100,6 +101,16 @@ def _window(points):
         "drawdown_peak_date": drawdown_peak,
         "drawdown_trough_date": trough,
         "recovery_date": recovery if worst else None,
+        "recovery_calendar_days_from_peak": (
+            date.fromisoformat(recovery) - date.fromisoformat(drawdown_peak)
+        ).days
+        if recovery and worst
+        else None,
+        "recovery_calendar_days_from_trough": (
+            date.fromisoformat(recovery) - date.fromisoformat(trough)
+        ).days
+        if recovery and worst
+        else None,
         "annualized_volatility_pct": _percent(stdev(rates) * math.sqrt(252))
         if len(rates) >= 2 and max_gap <= 18
         else None,
@@ -194,3 +205,65 @@ def compare_nav(rows, comparison_rows):
         "comparison_role": "comparison fund/target ETF; not the official composite benchmark",
         "currency_caveat": "Verify matching NAV currencies before interpreting the comparison.",
     }
+
+
+def reconcile_benchmark_disclosure(rows, disclosure):
+    """Cross-check disclosed fund returns without manufacturing benchmark daily data."""
+    if not disclosure.get("report_end_date"):
+        return disclosure
+    end = date.fromisoformat(disclosure["report_end_date"])
+    points, _ = wealth_series(rows)
+    dates = [point[0] for point in points]
+    last = bisect_right(dates, end.isoformat()) - 1
+    if last < 0 or (end - date.fromisoformat(dates[last])).days > 10:
+        disclosure["gaps"].append(
+            "NAV history does not cover the disclosed report-end date."
+        )
+        return disclosure
+    periods = {
+        "过去三个月": 3,
+        "过去六个月": 6,
+        "过去一年": 12,
+        "过去三年": 36,
+        "过去五年": 60,
+        "过去七年": 84,
+        "过去十年": 120,
+    }
+    for item in disclosure["periods"]:
+        months = periods.get(item["period"])
+        if months:
+            year, month = divmod(end.year * 12 + end.month - 1 - months, 12)
+            month += 1
+            day = (
+                monthrange(year, month)[1]
+                if end.day == monthrange(end.year, end.month)[1]
+                else min(end.day, monthrange(year, month)[1])
+            )
+            wanted = date(year, month, day)
+        elif item["period"] == "自基金合同生效起至今" and disclosure.get(
+            "inception_date"
+        ):
+            wanted = date.fromisoformat(disclosure["inception_date"])
+        else:
+            continue
+        first = bisect_right(dates, wanted.isoformat()) - 1
+        if (
+            first < 0
+            or first >= last
+            or (wanted - date.fromisoformat(dates[first])).days > 18
+        ):
+            continue
+        calculated = _percent(points[last][1] / points[first][1] - 1)
+        difference = round(calculated - item["fund_return_pct"], 6)
+        item["nav_reconciliation"] = {
+            "start_date": dates[first],
+            "end_date": dates[last],
+            "calculated_return_pct": calculated,
+            "difference_from_disclosed_pp": difference,
+            "consistent_with_rounding": abs(difference) <= 0.03,
+        }
+        if abs(difference) > 0.03:
+            disclosure["gaps"].append(
+                f"{item['period']}: retained NAV return conflicts with the disclosed fund return."
+            )
+    return disclosure

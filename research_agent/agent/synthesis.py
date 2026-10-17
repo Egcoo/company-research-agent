@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from research_agent.agent import _text
-from research_agent.agent.instructions import FUND_SYNTHESIS, STOCK_SYNTHESIS
+from research_agent.agent.instructions import STOCK_SYNTHESIS, fund_instructions
 from research_agent.config import ResearchError
 from research_agent.runtime.reporting import (
     _source_list,
@@ -97,7 +97,9 @@ def synthesize_report(
         }
     )
     system = methodology + (
-        FUND_SYNTHESIS if target_type == "fund" else STOCK_SYNTHESIS
+        fund_instructions(fund_type, synthesis=True)
+        if target_type == "fund"
+        else STOCK_SYNTHESIS
     )
     if target_type == "fund":
         system += (

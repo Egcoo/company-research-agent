@@ -1,4 +1,4 @@
-"""Check the passive-fund path without model providers, SEC access or live network."""
+"""Check the shared fund path without model providers, SEC access or live network."""
 
 import io
 import json
@@ -44,13 +44,18 @@ def fund_case(tmp_path):
         kind="etf_feeder",
         requested_class="A",
         actual_class="A",
+        report_text=None,
+        nav_rows=None,
     ):
         settings = Settings()
         budget = ResearchBudget(settings)
         seen = []
-        name = (
-            f"示例沪深300{'ETF联接' if kind == 'etf_feeder' else '指数'}{actual_class}"
-        )
+        suffix = {
+            "etf_feeder": "ETF联接",
+            "passive_index": "指数",
+            "enhanced_index": "指数增强",
+        }[kind]
+        name = f"示例沪深300{suffix}{actual_class}"
 
         def respond(request):
             url = "https://" + request.headers["Host"] + request.url.raw_path.decode()
@@ -91,12 +96,36 @@ def fund_case(tmp_path):
                         "unitMoney": "",
                     },
                 ]
-                text = f"var fS_code={json.dumps(code)};var fS_name={json.dumps(name)};var Data_netWorthTrend={json.dumps(rows)};"
+                selected = request.url.path.rsplit("/", 1)[-1].removesuffix(".js")
+                selected_name = name if selected == code else "示例沪深300ETF"
+                rows = rows if nav_rows is None else nav_rows
+                text = f"var fS_code={json.dumps(selected)};var fS_name={json.dumps(selected_name)};var Data_netWorthTrend={json.dumps(rows)};"
                 return httpx.Response(
                     200, headers={"content-type": "application/javascript"}, text=text
                 )
             if "/f10/JJGG" in url:
-                return httpx.Response(200, json={"Data": []})
+                records = (
+                    [
+                        {
+                            "FUNDCODE": code,
+                            "TITLE": "示例基金2026年中期报告",
+                            "PUBLISHDATE": "2026-08-31",
+                            "ID": "AN202608311828748047",
+                        }
+                    ]
+                    if report_text
+                    else []
+                )
+                return httpx.Response(200, json={"Data": records})
+            if (
+                url == "https://pdf.dfcfw.com/pdf/H2_AN202608311828748047_1.pdf"
+                and report_text
+            ):
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "application/pdf"},
+                    content=b"%PDF-mocked text extraction",
+                )
             raise AssertionError(f"Unexpected source request: {url}")
 
         client = httpx.Client(transport=httpx.MockTransport(respond))
@@ -127,7 +156,12 @@ def fund_case(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "kind,code", [("etf_feeder", "110020"), ("passive_index", "000051")]
+    "kind,code",
+    [
+        ("etf_feeder", "110020"),
+        ("passive_index", "000051"),
+        ("enhanced_index", "010736"),
+    ],
 )
 def test_fund_branch_keeps_one_model_and_passes_canonical_data_to_fund_synthesis(
     fund_case, kind, code
@@ -204,8 +238,78 @@ def test_fund_research_model_failure_keeps_numeric_inputs_and_still_delivers(fun
     )
 
 
+def test_enhanced_risk_disclosure_survives_research_failure_and_reaches_synthesis(
+    fund_case, monkeypatch
+):
+    from research_agent.tools import fund as fund_module
+
+    text = """示例基金010736
+基金合同生效日2025年1月2日
+报告期末(2026年6月30日)
+业绩比较基准沪深300指数收益率×95%+存款利率×5%
+3.2.1 基金份额净值增长率与基准比较
+示例指数增强 A
+过去六个月 10% 1% 8% 0.8% 2% 0.2%
+3.2.2 净值图
+本基金年化跟踪误差不超过6%。报告期年化跟踪误差15.46%，超过目标控制范围。
+"""
+    monkeypatch.setattr(fund_module, "read_pdf", lambda body, budget: ([text], 1))
+
+    def broken(messages):
+        assert "enhancement process" in messages[0].content
+        raise RuntimeError("research failed")
+
+    def synthesis(messages):
+        packet = json.loads(messages[1].content)
+        disclosure = packet["fund_data"]["benchmark_disclosures"][0]
+        assert disclosure["periods"][0]["return_difference_pp"] == 2
+        assert disclosure["tracking_risk"]["target_exceeded"]
+        assert disclosure["tracking_risk"]["reported_tracking_error_pct"] == 15.46
+        assert disclosure["information_ratio"] is None
+        assert "target_exceeded=true" in messages[0].content
+        assert "target_etf" not in packet["fund_data"]
+        return AIMessage(content=fund_report("010736", "enhanced_index"))
+
+    run, model, seen = fund_case(
+        [broken, synthesis], code="010736", kind="enhanced_index", report_text=text
+    )
+    result = run.run()
+    assert (
+        result["status"] == "generated" and result["errors"][0]["stage"] == "research"
+    )
+    assert model.i == 2 and not any("sec.gov" in url for url in seen)
+    saved = json.loads((run.directory / "fund_data.json").read_text(encoding="utf-8"))
+    assert saved["benchmark_disclosures"][0]["tracking_risk"]["target_exceeded"]
+    assert (run.directory / "report.md").exists()
+    assert (run.directory / "nav-010736.json").exists()
+
+
+def test_enhanced_etf_comparison_is_not_labeled_as_a_designated_target(fund_case):
+    rows = [
+        {
+            "x": int(datetime(2026, 10, day, tzinfo=CHINA).timestamp() * 1000),
+            "y": nav,
+            "equityReturn": growth,
+            "unitMoney": "",
+        }
+        for day, nav, growth in [(6, 1, 0), (7, 1.1, 10), (8, 1.21, 10)]
+    ]
+    run, _, _ = fund_case([], code="010736", kind="enhanced_index", nav_rows=rows)
+    tools = run.source_tools
+    tools.get_fund_profile()
+    result = tools.get_nav_history(comparison_code="510310")
+    assert "error" not in result
+    role = result["comparison"]["comparison_role"]
+    assert "not the official benchmark" in role
+    assert "not a designated target ETF" in role
+    assert tools.fund_data["comparisons"]["010736/510310"]["comparison_role"] == role
+
+
+@pytest.mark.parametrize(
+    "kind,code", [("passive_index", "000051"), ("enhanced_index", "010736")]
+)
 def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
-    tmp_path, monkeypatch, capfd
+    tmp_path, monkeypatch, capfd, kind, code
 ):
     calls = []
     monkeypatch.setattr(
@@ -220,9 +324,9 @@ def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
                 "--target-type",
                 "fund",
                 "--fund-code",
-                "000051",
+                code,
                 "--fund-type",
-                "passive_index",
+                kind,
                 "--share-class",
                 "a",
                 "--market",
@@ -235,10 +339,8 @@ def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
         )
         == 0
     )
-    assert calls[0]["ticker"] == "000051" and calls[0]["share_class"] == "A"
-    assert (
-        calls[0]["target_type"] == "fund" and calls[0]["fund_type"] == "passive_index"
-    )
+    assert calls[0]["ticker"] == code and calls[0]["share_class"] == "A"
+    assert calls[0]["target_type"] == "fund" and calls[0]["fund_type"] == kind
 
 
 @pytest.mark.parametrize(
@@ -261,7 +363,12 @@ def test_unsupported_fund_cli_scope_stops_before_provider_access(monkeypatch, ex
         )
 
 
-def test_fund_inputs_roundtrip_into_the_existing_worker(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "kind,code", [("etf_feeder", "110020"), ("enhanced_index", "010736")]
+)
+def test_fund_inputs_roundtrip_into_the_existing_worker(
+    tmp_path, monkeypatch, kind, code
+):
     captured = {}
 
     def supervise(command, directory, seconds, *, report_filename):
@@ -277,11 +384,11 @@ def test_fund_inputs_roundtrip_into_the_existing_worker(tmp_path, monkeypatch):
     mvp.run_mvp(
         Settings(),
         query="研究基金",
-        ticker="110020",
+        ticker=code,
         as_of=date(2026, 10, 9),
         output_dir=tmp_path,
         target_type="fund",
-        fund_type="etf_feeder",
+        fund_type=kind,
         share_class="A",
     )
     assert captured["inputs"]["target_type"] == "fund"
@@ -297,10 +404,10 @@ def test_fund_inputs_roundtrip_into_the_existing_worker(tmp_path, monkeypatch):
     monkeypatch.setattr(mvp, "MvpRun", Worker)
     monkeypatch.setattr(sys, "argv", ["mvp", "--worker", str(captured["directory"])])
     mvp.main()
-    assert captured["worker_args"][2] == "110020"
+    assert captured["worker_args"][2] == code
     assert captured["worker_kwargs"] == {
         "target_type": "fund",
-        "fund_type": "etf_feeder",
+        "fund_type": kind,
         "share_class": "A",
     }
     assert captured["ran"]

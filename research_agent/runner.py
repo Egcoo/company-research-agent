@@ -1,4 +1,4 @@
-"""Run full US-stock or passive-fund research through the single-agent MVP."""
+"""Run full US-stock or supported fund research through the single-agent MVP."""
 
 import argparse
 import json
@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from research_agent.config import ConfigurationError, Settings
+from research_agent.fund_types import SUPPORTED_FUND_TYPES
 from research_agent.skill_loader import load_adapter
 
 
@@ -26,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         description="DeepEquity — Agentic Company Research System"
     )
     parser.add_argument(
-        "query", help="Full US-company or China OTC passive-fund research question"
+        "query", help="Full US-company or China OTC supported-fund research question"
     )
     parser.add_argument(
         "--ticker",
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=[
             kind
             for kind in adapter.routes["fund"].subtype_sections
-            if kind in {"passive_index", "etf_feeder"}
+            if kind in SUPPORTED_FUND_TYPES
         ],
     )
     parser.add_argument("--share-class")
@@ -64,14 +65,14 @@ def main(argv: list[str] | None = None) -> int:
             not arguments.fund_code
             or not re.fullmatch(r"[0-9]{6}", arguments.fund_code)
             or arguments.ticker
-            or arguments.fund_type not in {"passive_index", "etf_feeder"}
+            or arguments.fund_type not in SUPPORTED_FUND_TYPES
             or not arguments.share_class
             or not re.fullmatch(r"[A-Za-z]", arguments.share_class)
             or arguments.market not in {None, "CN"}
             or arguments.scope not in {None, "full"}
         ):
             parser.error(
-                "Fund MVP requires --fund-code, --fund-type passive_index/etf_feeder, "
+                "Fund MVP requires --fund-code, --fund-type passive_index/etf_feeder/enhanced_index, "
                 "--share-class, CN market and full scope."
             )
     elif (
@@ -84,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         or arguments.fund_code
     ):
         parser.error(
-            "Stock MVP requires an explicit US stock ticker and full scope; use the explicit fund options for passive funds."
+            "Stock MVP requires an explicit US stock ticker and full scope; use the explicit fund options for fund research."
         )
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)

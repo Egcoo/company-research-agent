@@ -38,7 +38,7 @@ _ERROR_MESSAGES = {
     "unsupported_content_type": "This source format is unsupported; seek readable HTML or record a gap.",
     "fund_identity_mismatch": "Fund code, name, or share class conflicts with the requested product.",
     "fund_identity_unverified": "The requested fund identity could not be verified; do not write an investment recommendation.",
-    "fund_type_unsupported": "This MVP supports passive index funds and ETF feeder funds only.",
+    "fund_type_unsupported": "This MVP supports passive index, ETF feeder and enhanced index funds only.",
     "fund_history_short": "There is not enough comparable NAV history before the cutoff.",
     "fund_return_conflict": "NAV and return data conflict; do not invent or fill the missing performance.",
     "pdf_no_text": "This PDF has no readable text layer; OCR is unavailable.",

@@ -21,6 +21,7 @@ from research_agent.config import (
     ResearchError,
     Settings,
 )
+from research_agent.fund_types import SUPPORTED_FUND_TYPES
 from research_agent.model_errors import _model_connection_error
 from research_agent.runtime import _write_json
 from research_agent.runtime.reporting import (
@@ -68,13 +69,13 @@ def _validate_target(ticker, as_of, target_type, fund_type, share_class):
             or len(ticker) != 6
             or not ticker.isascii()
             or not ticker.isdigit()
-            or fund_type not in {"passive_index", "etf_feeder"}
+            or fund_type not in SUPPORTED_FUND_TYPES
             or not isinstance(share_class, str)
             or len(share_class) != 1
             or not "A" <= share_class <= "Z"
         ):
             raise ConfigurationError(
-                "Fund MVP requires a six-digit code, passive_index/etf_feeder subtype and explicit share class."
+                "Fund MVP requires a six-digit code, supported fund subtype and explicit share class."
             )
     elif target_type != "stock":
         raise ConfigurationError("MVP target type must be stock or fund.")

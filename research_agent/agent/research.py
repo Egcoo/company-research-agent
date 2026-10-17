@@ -1,4 +1,4 @@
-"""Plan and conduct stock research with injected tools and runtime callbacks."""
+"""Conduct stock or fund research with injected tools and runtime callbacks."""
 
 import json
 import time
@@ -6,7 +6,7 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from research_agent.agent import _text
-from research_agent.agent.instructions import FUND_RESEARCH, STOCK_RESEARCH
+from research_agent.agent.instructions import STOCK_RESEARCH, fund_instructions
 from research_agent.config import ResearchError
 
 
@@ -40,7 +40,9 @@ def run_research(
             "Fund identity and NAVs must be verified before model research.",
         )
     tools = {tool.name: tool for tool in source_tools.tools()}
-    system = methodology + (FUND_RESEARCH if target_type == "fund" else STOCK_RESEARCH)
+    system = methodology + (
+        fund_instructions(fund_type) if target_type == "fund" else STOCK_RESEARCH
+    )
     messages = [
         SystemMessage(content=system),
         HumanMessage(
@@ -80,7 +82,7 @@ def run_research(
         control = HumanMessage(
             content=(
                 (
-                    "Research acquisition is closed. Save fund identity, dated NAV/risk/tracking calculations, index and target-ETF exposure, fees, alternatives and gaps already obtained. Finish with Markdown notes; do not retrieve more sources."
+                    "Research acquisition is closed. Save fund identity, dated NAV/risk/comparison calculations, underlying exposures, official benchmark, strategy, fees, alternatives and gaps already obtained. Finish with Markdown notes; do not retrieve more sources."
                     if target_type == "fund"
                     else "Research acquisition is closed. Save the substantive research, financial tables, forecast assumptions, valuation calculations and gaps already obtained. Finish with Markdown notes; do not retrieve more sources."
                 )

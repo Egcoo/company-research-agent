@@ -63,9 +63,10 @@ def parse_profile(html, code):
             "fund_identity_unverified", "No named fund profile was found."
         )
     category = fields.get("基金类型", "")
+    identity_name = name + " " + fields.get("基金全称", "")
     kind = (
         "enhanced_index"
-        if "增强" in name
+        if "增强" in identity_name and ("指数" in identity_name or "指数" in category)
         else "etf_feeder"
         if re.search(r"ETF.*联接|联接.*ETF", name, re.I)
         else "etf"
@@ -203,3 +204,136 @@ def parse_documents(payload, code, as_of, limit=4):
     return [
         groups[key] for key in ("periodic", "summary", "prospectus") if key in groups
     ][:limit]
+
+
+def parse_benchmark_disclosure(text, selected_class):
+    """Read an explicitly labeled share-class performance table and risk disclosures."""
+    result = {"periods": [], "gaps": []}
+    for key, pattern in (
+        (
+            "report_end_date",
+            r"报告期末\s*[（(]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        ),
+        (
+            "inception_date",
+            r"基金合同生效日\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        ),
+    ):
+        found = re.search(pattern, text)
+        if found:
+            try:
+                result[key] = date(
+                    *(int(value) for value in found.groups())
+                ).isoformat()
+            except ValueError:
+                pass
+    definition = re.search(r"(?m)^业绩比较基准\s*([^\n]+)", text)
+    if definition and re.search(r"指数|利率|收益率", definition.group(1)):
+        result["definition"] = definition.group(1).strip()
+    starts = [
+        item
+        for item in re.finditer(r"(?m)^3\.2(?:\.1)?[ \t]+基金(?:份额)?净值[^\n]*", text)
+        if not re.search(r"\.{4}|…{2}", item.group(0))
+    ]
+    start = next(
+        (item for item in starts if item.group(0).startswith("3.2.1")),
+        starts[0] if starts else None,
+    )
+    if start:
+        body = text[start.end() :]
+        end = re.search(r"(?m)^3\.2\.2\s|^3\.3\s|^§\s*4\s", body)
+        body = body[: end.start()] if end else body
+        classes = list(
+            re.finditer(r"(?m)^[^\n%]*[\u4e00-\u9fff][^\n%]*?([A-Z])\s*$", body)
+        )
+        conflicting_periods = set()
+        for index, heading in enumerate(classes):
+            if heading.group(1) != selected_class:
+                continue
+            stop = classes[index + 1].start() if index + 1 < len(classes) else len(body)
+            section = re.sub(r"\s+", "", body[heading.end() : stop])
+            section = section.replace("－", "-").replace("−", "-").replace("％", "%")
+            pattern = (
+                r"(过去(?:三个月|六个月|一年|三年|五年|七年|十年)|自基金合同生效起至今)"
+                + r"([+-]?\d+(?:\.\d+)?)%" * 6
+            )
+            for found in re.finditer(pattern, section):
+                if found.group(1) in conflicting_periods:
+                    continue
+                values = [float(value) for value in found.groups()[1:]]
+                if not all(math.isfinite(value) for value in values):
+                    result["gaps"].append(
+                        f"{found.group(1)}: non-finite disclosed return"
+                    )
+                    continue
+                difference = round(values[0] - values[2], 6)
+                if abs(difference - values[4]) > 0.03:
+                    result["gaps"].append(
+                        f"{found.group(1)}: inconsistent disclosed return columns"
+                    )
+                    continue
+                item = {
+                    "period": found.group(1),
+                    "fund_return_pct": values[0],
+                    "benchmark_return_pct": values[2],
+                    "return_difference_pp": difference,
+                }
+                previous = next(
+                    (p for p in result["periods"] if p["period"] == item["period"]),
+                    None,
+                )
+                if previous is None:
+                    result["periods"].append(item)
+                elif previous != item:
+                    result["gaps"].append(
+                        f"{item['period']}: conflicting share-class table rows"
+                    )
+                    conflicting_periods.add(item["period"])
+                    result["periods"] = [
+                        row
+                        for row in result["periods"]
+                        if row["period"] != item["period"]
+                    ]
+    if "report_end_date" not in result:
+        result["gaps"].append(
+            "The performance table's report-end date was not verified."
+        )
+        result["periods"] = []
+    if not result["periods"]:
+        result["gaps"].append(
+            "No unambiguous performance table for the selected share class was parsed."
+        )
+    compact = re.sub(r"\s+", "", text).replace("％", "%")
+    target = re.search(r"年化跟踪误差不超过(\d+(?:\.\d+)?)%", compact)
+    actual = {
+        float(value)
+        for value in re.findall(
+            r"年化跟踪误差(?:为|约为|[：:])?(\d+(?:\.\d+)?)%", compact
+        )
+    }
+    risk = {}
+    if target:
+        risk["tracking_error_target_pct"] = float(target.group(1))
+    if len(actual) == 1:
+        risk["reported_tracking_error_pct"] = actual.pop()
+    elif actual:
+        result["gaps"].append(
+            "Conflicting reported tracking errors; inspect the original disclosure."
+        )
+    if {"tracking_error_target_pct", "reported_tracking_error_pct"} <= risk.keys():
+        risk["target_exceeded"] = (
+            risk["reported_tracking_error_pct"] > risk["tracking_error_target_pct"]
+        )
+    result.update(
+        share_class=selected_class,
+        tracking_risk=risk,
+        daily_series_available=False,
+        information_ratio=None,
+        return_scope="Net NAV returns after fund-level operating expenses, before investor subscription/redemption fees.",
+        comparison_role="official disclosed benchmark, at the stated report-end date",
+        period_caveat="Published windows overlap; positive differences do not establish independent, persistent alpha.",
+    )
+    result["gaps"].append(
+        "Official benchmark daily data is unavailable; information ratio and independently calculated official-benchmark tracking error are not computed. Return-table standard-deviation differences are not tracking error."
+    )
+    return result

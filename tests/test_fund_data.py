@@ -10,12 +10,17 @@ from research_agent.tools.fund_data import (
     CHINA,
     fund_code,
     js_value,
+    parse_benchmark_disclosure,
     parse_documents,
     parse_nav,
     parse_profile,
     share_class,
 )
-from research_agent.tools.fund_metrics import compare_nav, summarize_nav
+from research_agent.tools.fund_metrics import (
+    compare_nav,
+    reconcile_benchmark_disclosure,
+    summarize_nav,
+)
 
 
 def script(code="110020", rows=None, name="示例沪深300ETF联接A"):
@@ -128,13 +133,14 @@ def test_drawdown_recovery_and_volatility_have_known_results_and_no_short_period
     assert metrics["max_drawdown_pct"] == pytest.approx(-10)
     assert metrics["annualized_volatility_pct"] == pytest.approx(224.499443)
     assert metrics["annualized_return_pct"] is None and metrics["recovery_date"] is None
+    assert metrics["recovery_calendar_days_from_peak"] is None
     rows.append(
         {"date": "2026-01-04", "nav": 1.1, "daily_return_pct": None, "event": ""}
     )
-    assert (
-        summarize_nav(rows)["periods"]["available_history"]["recovery_date"]
-        == "2026-01-04"
-    )
+    recovered = summarize_nav(rows)["periods"]["available_history"]
+    assert recovered["recovery_date"] == "2026-01-04"
+    assert recovered["recovery_calendar_days_from_peak"] == 2
+    assert recovered["recovery_calendar_days_from_trough"] == 1
 
 
 def test_comparison_uses_common_dates_and_does_not_rename_etf_as_official_benchmark():
@@ -185,3 +191,121 @@ def test_disclosures_filter_future_dates_and_remain_discovery_only():
     result = parse_documents({"Data": records}, "110020", date(2026, 10, 15))
     assert len(result) == 1 and result[0]["published_at"] == "2026-08-31"
     assert result[0]["coverage"] == "discovery_only"
+
+
+@pytest.mark.parametrize(
+    "name,category,expected",
+    [
+        ("示例沪深300指数精选增强A", "指数型-股票", "enhanced_index"),
+        ("示例回报增强混合A", "混合型-偏股", "unsupported"),
+        ("示例收益增强债券A", "债券型-混合债", "unsupported"),
+    ],
+)
+def test_enhancement_label_requires_an_index_product(name, category, expected):
+    html = f"<table><tr><th>基金代码</th><td>010736</td><th>基金简称</th><td>{name}</td></tr><tr><th>基金类型</th><td>{category}</td></tr></table>"
+    assert parse_profile(html, "010736")["fund_type"] == expected
+
+
+def test_full_fund_name_can_identify_enhancement_hidden_by_a_short_alias():
+    html = """<table><tr><th>基金代码</th><td>163407</td>
+    <th>基金简称</th><td>示例沪深300指数(LOF)A</td></tr>
+    <tr><th>基金全称</th><td>示例沪深300指数增强型证券投资基金(LOF)</td>
+    <th>基金类型</th><td>指数型-股票</td></tr></table>"""
+    assert parse_profile(html, "163407")["fund_type"] == "enhanced_index"
+
+
+@pytest.fixture
+def disclosed_performance():
+    return """示例基金010736中期报告
+基金合同生效日 2024年6月30日
+报告期末(2026年6月30日)
+业绩比较基准 指数收益率×95%+存款利率×5%
+3.2 基金净值表现 ........................ 7
+§4 管理人报告 ........................ 10
+3.2 基金净值表现
+3.2.1 基金份额净值增长率及其与同期业绩比较基准收益率的比较
+示例指数增强 A
+阶段 份额净值增长率 标准差 基准收益率 标准差 差异 差异
+过去三个月 12.00% 1.20% 5.00% 0.80% 7.00% 0.40%
+过去六个月 10.00% 1.10% 8.00% 0.90% 2.00% 0.20%
+自基金合同生
+效起至今 21.00% 1.00% 20.00% 0.80% 1.00% 0.20%
+示例指数增强 C
+过去三个月 11.90% 1.20% 5.00% 0.80% 6.90% 0.40%
+3.2.2 累计净值图
+过去三个月 99.00% 1.20% 5.00% 0.80% 94.00% 0.40%
+本基金年化跟踪误差不超过6%。报告期年化跟踪误差7.00%，超过目标控制范围。
+"""
+
+
+def test_official_performance_skips_contents_and_other_classes_without_fabricating_ir(
+    disclosed_performance,
+):
+    result = parse_benchmark_disclosure(disclosed_performance, "A")
+    assert result["report_end_date"] == "2026-06-30"
+    assert result["inception_date"] == "2024-06-30"
+    assert result["definition"] == "指数收益率×95%+存款利率×5%"
+    assert [row["fund_return_pct"] for row in result["periods"]] == [12, 10, 21]
+    assert result["periods"][0]["return_difference_pp"] == 7
+    assert result["tracking_risk"] == {
+        "tracking_error_target_pct": 6,
+        "reported_tracking_error_pct": 7,
+        "target_exceeded": True,
+    }
+    assert result["information_ratio"] is None and not result["daily_series_available"]
+    assert (
+        parse_benchmark_disclosure(disclosed_performance, "C")["periods"][0][
+            "fund_return_pct"
+        ]
+        == 11.9
+    )
+    assert not parse_benchmark_disclosure(disclosed_performance, "Y")["periods"]
+
+
+def test_ambiguous_or_undated_disclosed_returns_stay_gaps(disclosed_performance):
+    undated = disclosed_performance.replace("报告期末(2026年6月30日)", "")
+    assert not parse_benchmark_disclosure(undated, "A")["periods"]
+    broken = disclosed_performance.replace("7.00% 0.40%", "9.00% 0.40%")
+    result = parse_benchmark_disclosure(broken, "A")
+    assert all(row["period"] != "过去三个月" for row in result["periods"])
+    assert any("inconsistent" in gap for gap in result["gaps"])
+    missing = disclosed_performance.replace(
+        "报告期年化跟踪误差7.00%", "报告期跟踪风险未披露"
+    )
+    risk = parse_benchmark_disclosure(missing, "A")["tracking_risk"]
+    assert "reported_tracking_error_pct" not in risk and "target_exceeded" not in risk
+
+
+def test_disclosed_nav_reconciliation_uses_month_end_and_preserves_conflicts():
+    rows = [
+        {"date": day, "nav": nav, "daily_return_pct": None, "event": ""}
+        for day, nav in [("2025-12-31", 1), ("2026-03-31", 1.02), ("2026-06-30", 1.1)]
+    ]
+    disclosure = {
+        "report_end_date": "2026-06-30",
+        "gaps": [],
+        "periods": [
+            {"period": "过去三个月", "fund_return_pct": 7.84},
+            {"period": "过去六个月", "fund_return_pct": 9},
+        ],
+    }
+    result = reconcile_benchmark_disclosure(rows, disclosure)
+    three, six = result["periods"]
+    assert three["nav_reconciliation"]["start_date"] == "2026-03-31"
+    assert three["nav_reconciliation"]["consistent_with_rounding"]
+    assert six["nav_reconciliation"]["calculated_return_pct"] == 10
+    assert not six["nav_reconciliation"]["consistent_with_rounding"]
+    assert result["gaps"] and six["fund_return_pct"] == 9
+
+
+def test_conflicting_return_rows_do_not_hide_an_independent_tracking_risk(
+    disclosed_performance,
+):
+    duplicate = "示例指数增强 A\n过去三个月 13.00% 1.20% 5.00% 0.80% 8.00% 0.40%\n"
+    text = disclosed_performance.replace(
+        "3.2.2 累计净值图", duplicate + "3.2.2 累计净值图"
+    )
+    result = parse_benchmark_disclosure(text, "A")
+    assert all(row["period"] != "过去三个月" for row in result["periods"])
+    assert result["tracking_risk"]["target_exceeded"]
+    assert any("conflicting" in gap for gap in result["gaps"])

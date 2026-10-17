@@ -1,4 +1,4 @@
-"""Acquire passive-fund materials and calculate NAV metrics within the MVP budget."""
+"""Acquire fund materials and calculate NAV metrics within the shared MVP budget."""
 
 import json
 import re
@@ -9,16 +9,22 @@ from urllib.parse import urlsplit
 from langchain_core.tools import StructuredTool
 
 from research_agent.config import ResearchError
+from research_agent.fund_types import FUND_TYPES
 from research_agent.runtime import _write_json
 from research_agent.tools.fund_data import (
     CHINA,
     fund_code,
+    parse_benchmark_disclosure,
     parse_documents,
     parse_nav,
     parse_profile,
     share_class,
 )
-from research_agent.tools.fund_metrics import compare_nav, summarize_nav
+from research_agent.tools.fund_metrics import (
+    compare_nav,
+    reconcile_benchmark_disclosure,
+    summarize_nav,
+)
 from research_agent.tools.mvp import MvpTools
 from research_agent.tools.pdf import pdf_window, read_pdf
 
@@ -42,6 +48,7 @@ class FundTools(MvpTools):
         }
         self._profiles, self._series, self._pdfs = {}, {}, {}
         self._documents = {}
+        self._benchmark_disclosures = {}
         self._dated_fees = {"A": {}, "C": {}}
         self._fee_sources = []
 
@@ -78,7 +85,7 @@ class FundTools(MvpTools):
                 raise ResearchError(
                     "fund_identity_mismatch", "Fund subtype or share class differs."
                 )
-            if profile["fund_type"] not in {"passive_index", "etf_feeder", "etf"}:
+            if profile["fund_type"] not in (*FUND_TYPES, "etf"):
                 raise ResearchError(
                     "fund_type_unsupported", "Unsupported fund product."
                 )
@@ -104,7 +111,7 @@ class FundTools(MvpTools):
         return self._invoke("get_fund_profile", operation, acquire=True)
 
     def get_nav_history(self, code: str = "", comparison_code: str = "") -> dict:
-        """Calculate dated returns and risk from saved NAV rows; optionally align a comparison."""
+        """Calculate fund/ETF NAV metrics and comparisons; never pass an index code here."""
 
         def load(selected):
             if selected in self._series:
@@ -193,6 +200,11 @@ class FundTools(MvpTools):
                 other = fund_code(comparison_code)
                 compared = compare_nav(rows, load(other))
                 compared.update(fund_code=selected, comparison_code=other)
+                if self.fund_type == "enhanced_index":
+                    compared["comparison_role"] = (
+                        "comparison fund or ETF proxy; not the official benchmark "
+                        "and not a designated target ETF"
+                    )
                 self.fund_data["comparisons"][f"{selected}/{other}"] = compared
                 self._append_note(
                     "### 程序计算：同日净值对比\n\n"
@@ -319,6 +331,19 @@ class FundTools(MvpTools):
                 max_chars=max_chars or self.settings.max_content_chars,
                 start_page=page_number,
             )
+            disclosure = None
+            if (
+                self.fund_type == "enhanced_index"
+                and metadata.get("fund_code") == self.ticker
+                and metadata.get("kind") == "periodic"
+                and url not in self._benchmark_disclosures
+            ):
+                disclosure = parse_benchmark_disclosure("\n".join(pages), self.share_class)
+                report_end = disclosure.get("report_end_date")
+                if report_end and date.fromisoformat(report_end) > self.as_of:
+                    raise ResearchError("future_source", "The performance period is after cutoff.")
+                disclosure.update(source_url=page.url, published_at=published.isoformat())
+                reconcile_benchmark_disclosure(self._series.get(self.ticker, []), disclosure)
             result = self._source(
                 page,
                 metadata.get("title", "基金披露 PDF"),
@@ -327,6 +352,14 @@ class FundTools(MvpTools):
                 published_at=published.isoformat(),
                 **window,
             )
+            if disclosure is not None:
+                self._benchmark_disclosures[url] = disclosure
+                self.fund_data["benchmark_disclosures"] = list(self._benchmark_disclosures.values())
+                self._append_note(
+                    "### 程序提取与复算：官方基准期间表现及跟踪风险\n\n"
+                    + json.dumps(disclosure, ensure_ascii=False)
+                    + f"\n\n来源：{page.url}"
+                )
             if metadata.get("fund_code") == self.ticker and metadata.get("kind") in {
                 "periodic",
                 "summary",
@@ -354,7 +387,7 @@ class FundTools(MvpTools):
                         {"url": page.url, "disclosure_date": published.isoformat()}
                     )
                 position = text.find("目标基金基本情况")
-                if position >= 0:
+                if position >= 0 and self.fund_type == "etf_feeder":
                     found = re.search(
                         r"基金主代码\s*(\d{6})", text[position : position + 1800]
                     )
@@ -480,10 +513,21 @@ class FundTools(MvpTools):
                     {"document": item["title"], "error": result["error"]}
                 )
             elif item["kind"] == "periodic":
-                self.read_source(item["url"], focus="销售服务费", max_chars=6000)
-                if self.fund_type == "passive_index":
-                    self.read_source(item["url"], focus="投资组合报告", max_chars=16000)
+                for focus, max_chars in FUND_TYPES[self.fund_type]["periodic_readings"]:
+                    reading = self.read_source(
+                        item["url"], focus=focus, max_chars=max_chars
+                    )
+                    if reading.get("error"):
+                        self.fund_data["gaps"].append(
+                            {"document_focus": focus, "error": reading["error"]}
+                        )
         self._share_costs()
+        if self.fund_type == "enhanced_index" and not any(
+            item.get("periods") for item in self._benchmark_disclosures.values()
+        ):
+            self.fund_data["gaps"].append(
+                "Official benchmark period returns could not be parsed for the selected share class; read the dated report and do not substitute an ETF or peer for the official benchmark."
+            )
         target = self.fund_data.get("target_etf", {}).get("code")
         if target:
             comparison = self.get_nav_history(comparison_code=target)
