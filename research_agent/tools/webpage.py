@@ -25,6 +25,7 @@ class FetchedPage(Contract):
     url: str
     text: str
     content_type: str
+    body: bytes = Field(default=b"", exclude=True, repr=False)
 
 
 class ExtractedContent(Contract):
@@ -208,6 +209,7 @@ class HttpFetcher:
                             url=current_url,
                             text=text,
                             content_type=content_type,
+                            body=bytes(body),
                         )
                 except httpx.TransportError:
                     logger.warning("document_transport_error attempt=%s", attempt + 1)

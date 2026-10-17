@@ -2,6 +2,7 @@
 
 import html
 import re
+from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -135,7 +136,79 @@ def _source_list(sources):
             .replace("]", "\\]")
             .replace("\n", " ")
         )
+        try:
+            retrieved = datetime.fromisoformat(
+                str(item.get("retrieved_at", "")).replace("Z", "+00:00")
+            )
+            if retrieved.tzinfo is None:
+                retrieved = retrieved.replace(tzinfo=UTC)
+            read_date = (
+                retrieved.astimezone(timezone(timedelta(hours=8))).date().isoformat()
+            )
+        except (ValueError, TypeError):
+            read_date = "未确认"
         lines.append(
-            f"- [{title}](<{url}>)；发布日期：{item.get('published_at') or '未确认'}；读取日期：{item['retrieved_at'][:10]}。"
+            f"- [{title}](<{url}>)；发布日期：{item.get('published_at') or '未确认'}；读取日期：{read_date}。"
         )
     return "\n".join(lines) + "\n"
+
+
+def insert_fund_costs(markdown, fund_data, headings):
+    """Place the reproducible A/C scenario table inside the fund-quality section."""
+    costs = (fund_data or {}).get("share_class_costs")
+    if not costs:
+        return markdown
+    title = "### A/C费用情景与复算口径"
+    lines = [
+        title,
+        "",
+        f"A类销售服务费 {costs['A_sales_service_pct_per_year']:g}%/年；"
+        f"C类 {costs['C_sales_service_pct_per_year']:g}%/年；"
+        f"费用差 {costs['annual_fee_difference_pp']:g} 个百分点/年。",
+        "",
+        "| A类一次性申购费假设 | 约略平衡年数 | 假设说明 |",
+        "|---|---:|---|",
+    ]
+    for index, item in enumerate(costs["scenarios"]):
+        assumption = (
+            "已读取资料中的最高申购费；不是用户实际渠道报价"
+            if index == 0
+            else "按最高费率一折作假设；不是已确认的用户折扣"
+        )
+        lines.append(
+            f"| {item['assumed_A_subscription_pct']:g}% | {item['break_even_years']:g} 年 | {assumption} |"
+        )
+    lines += [
+        "",
+        "复算公式：A类一次性申购费率 ÷（C类年销售服务费率 − A类年销售服务费率）。",
+        "这是仅比较申购费和销售服务费的近似情景，未计赎回费差异、复利及其他费用；用户渠道和持有期未知，不能据此直接宣布哪类份额更优。",
+    ]
+    sources = list(
+        dict.fromkeys(
+            [item["url"] for item in costs.get("dated_fee_sources", [])]
+            + costs.get("source_urls", [])
+        )
+    )
+    lines += [
+        "费用依据："
+        + "、".join(f"[资料{i}]({url})" for i, url in enumerate(sources, 1))
+        + "。",
+        "",
+    ]
+    # A subsection remains ordinary Markdown; it adds no primary report section or schema.
+    heading = f"## 6. {headings[5]}"
+    if heading not in markdown:
+        return markdown
+    markdown = re.sub(
+        rf"(?ms)^{re.escape(title)}\n.*?(?=^#{{2,3}}\s|\Z)",
+        "",
+        markdown,
+    )
+    position = markdown.index(heading)
+    return (
+        markdown[:position].rstrip()
+        + "\n\n"
+        + "\n".join(lines).rstrip()
+        + "\n\n"
+        + markdown[position:]
+    )

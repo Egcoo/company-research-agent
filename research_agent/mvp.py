@@ -45,6 +45,7 @@ from research_agent.runtime.supervisor import (
     supervise_process as supervise_process,
 )
 from research_agent.skill_loader import load_skill
+from research_agent.tools.fund import FundTools
 from research_agent.tools.mvp import MvpTools
 from research_agent.tools.web import WebSearch
 from research_agent.tools.webpage import HttpFetcher
@@ -52,6 +53,31 @@ from research_agent.tools.webpage import HttpFetcher
 
 def _now():
     return datetime.now(UTC).isoformat()
+
+
+def _validate_target(ticker, as_of, target_type, fund_type, share_class):
+    if not ticker or as_of > date.today():
+        raise ConfigurationError(
+            "MVP requires an explicit target code and a cutoff that is not in the future."
+        )
+    if target_type == "stock" and (fund_type or share_class):
+        raise ConfigurationError("Stock research does not accept fund options.")
+    if target_type == "fund":
+        if (
+            not isinstance(ticker, str)
+            or len(ticker) != 6
+            or not ticker.isascii()
+            or not ticker.isdigit()
+            or fund_type not in {"passive_index", "etf_feeder"}
+            or not isinstance(share_class, str)
+            or len(share_class) != 1
+            or not "A" <= share_class <= "Z"
+        ):
+            raise ConfigurationError(
+                "Fund MVP requires a six-digit code, passive_index/etf_feeder subtype and explicit share class."
+            )
+    elif target_type != "stock":
+        raise ConfigurationError("MVP target type must be stock or fund.")
 
 
 class MvpRun:
@@ -65,15 +91,23 @@ class MvpRun:
         as_of,
         directory,
         *,
+        target_type="stock",
+        fund_type=None,
+        share_class=None,
         model=None,
         fetcher=None,
         search=None,
     ):
         """Accept injected transports and models without reading credential files."""
-        if not ticker or as_of > date.today():
-            raise ConfigurationError(
-                "MVP requires an explicit ticker and a cutoff that is not in the future."
-            )
+        _validate_target(ticker, as_of, target_type, fund_type, share_class)
+        self.target_type, self.fund_type, self.share_class = (
+            target_type,
+            fund_type,
+            share_class,
+        )
+        self.report_filename = (
+            "report.md" if target_type == "fund" else "2026-10-13-GOOG.md"
+        )
         self.settings, self.query, self.ticker, self.as_of = (
             settings,
             query,
@@ -82,7 +116,7 @@ class MvpRun:
         )
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.bundle = load_skill(kind="stock", focused=False)
+        self.bundle = load_skill(kind=target_type, fund_type=fund_type, focused=False)
         self.budget = (
             fetcher.budget if fetcher is not None else ResearchBudget(settings)
         )
@@ -96,7 +130,8 @@ class MvpRun:
         self.research_until = self.budget.started_at + max(
             0, settings.deadline_seconds - min(120, settings.deadline_seconds / 2) - 5
         )
-        self.source_tools = MvpTools(
+        tools_class = FundTools if target_type == "fund" else MvpTools
+        self.source_tools = tools_class(
             settings,
             self.budget,
             self.fetcher,
@@ -104,6 +139,11 @@ class MvpRun:
             self.directory,
             as_of,
             ticker,
+            **(
+                {"fund_type": fund_type, "share_class": share_class}
+                if target_type == "fund"
+                else {}
+            ),
             event_callback=self.event,
             acquisition_allowed=lambda: (
                 time.monotonic()
@@ -202,10 +242,21 @@ class MvpRun:
             record_response=self._response,
             save_note=self._note,
             emit_event=self.event,
+            target_type=self.target_type,
+            fund_type=self.fund_type,
+            share_class=self.share_class,
         )
 
     def synthesize(self):
         """Delegate delivery with reading windows and explicit runtime callbacks."""
+        fund_data = getattr(self.source_tools, "fund_data", None)
+        if self.target_type == "fund" and not fund_data.get("identity_verified"):
+            raise ResearchError(
+                "fund_identity_unverified",
+                "Fund identity and dated NAVs were not verified.",
+            )
+        if self.target_type == "fund":
+            _write_json(self.directory / "fund_data.json", fund_data)
         return synthesize_report(
             model=self.model,
             methodology=self.bundle.methodology,
@@ -221,6 +272,11 @@ class MvpRun:
             model_options=self._options,
             record_response=self._response,
             emit_event=self.event,
+            target_type=self.target_type,
+            fund_data=fund_data,
+            fund_type=self.fund_type,
+            share_class=self.share_class,
+            report_filename=self.report_filename,
         )
 
     def run(self):
@@ -257,7 +313,7 @@ class MvpRun:
             result.update(
                 status="generated" if not checks["errors"] else "partial",
                 checks=checks,
-                report_written=(self.directory / "2026-10-13-GOOG.md").exists(),
+                report_written=(self.directory / self.report_filename).exists(),
             )
         except Exception as error:
             self._failure("delivery", error)
@@ -280,13 +336,20 @@ class MvpRun:
         return result
 
 
-def run_mvp(settings, *, query, ticker, as_of, output_dir):
-    """Create a fresh supervised stock run with credential-free persisted inputs."""
-    if not ticker or as_of > date.today():
-        raise ConfigurationError(
-            "MVP requires an explicit ticker and a cutoff that is not in the future."
-        )
-    bundle = load_skill(kind="stock", focused=False)
+def run_mvp(
+    settings,
+    *,
+    query,
+    ticker,
+    as_of,
+    output_dir,
+    target_type="stock",
+    fund_type=None,
+    share_class=None,
+):
+    """Create a supervised stock or fund run with credential-free persisted inputs."""
+    _validate_target(ticker, as_of, target_type, fund_type, share_class)
+    bundle = load_skill(kind=target_type, fund_type=fund_type, focused=False)
     directory = Path(output_dir).resolve() / "mvp" / uuid4().hex
     directory.mkdir(parents=True, exist_ok=False)
     public_settings = {
@@ -312,7 +375,12 @@ def run_mvp(settings, *, query, ticker, as_of, output_dir):
             "ticker": ticker,
             "as_of": str(as_of),
             "scope": "full",
-            "target_type": "stock",
+            "target_type": target_type,
+            **(
+                {"fund_type": fund_type, "share_class": share_class}
+                if target_type == "fund"
+                else {}
+            ),
             "settings": public_settings,
             "skill_files": bundle.files,
             "skill_hashes": bundle.hashes,
@@ -322,6 +390,7 @@ def run_mvp(settings, *, query, ticker, as_of, output_dir):
         [sys.executable, "-m", "research_agent.mvp", "--worker", str(directory)],
         directory,
         settings.deadline_seconds,
+        **({"report_filename": "report.md"} if target_type == "fund" else {}),
     )
 
 
@@ -338,6 +407,9 @@ def main():
         inputs["ticker"],
         date.fromisoformat(inputs["as_of"]),
         args.worker,
+        target_type=inputs.get("target_type", "stock"),
+        fund_type=inputs.get("fund_type"),
+        share_class=inputs.get("share_class"),
     )
     session.run()
 

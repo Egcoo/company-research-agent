@@ -36,6 +36,13 @@ _ERROR_MESSAGES = {
     "unsafe_sec_url": "The SEC URL must stay in the discovered company's accession directory.",
     "unsafe_url": "Use a public HTTP(S) URL without embedded credentials.",
     "unsupported_content_type": "This source format is unsupported; seek readable HTML or record a gap.",
+    "fund_identity_mismatch": "Fund code, name, or share class conflicts with the requested product.",
+    "fund_identity_unverified": "The requested fund identity could not be verified; do not write an investment recommendation.",
+    "fund_type_unsupported": "This MVP supports passive index funds and ETF feeder funds only.",
+    "fund_history_short": "There is not enough comparable NAV history before the cutoff.",
+    "fund_return_conflict": "NAV and return data conflict; do not invent or fill the missing performance.",
+    "pdf_no_text": "This PDF has no readable text layer; OCR is unavailable.",
+    "pdf_invalid": "The PDF text could not be extracted; preserve this as a data gap.",
 }
 
 
@@ -105,6 +112,18 @@ class MvpTools:
     def _event(self, tool: str, code: str = "ok") -> None:
         if self.event_callback:
             self.event_callback({"type": "tool_result", "tool": tool, "code": code})
+
+    def _remember_source(self, result: dict) -> None:
+        """Persist an actual reading before allowing its requested and final URLs."""
+        with self._lock:
+            with (self.directory / "sources.jsonl").open(
+                "a", encoding="utf-8"
+            ) as handle:
+                handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+            self.sources.append(result)
+            self.allowed_urls.update(
+                (result.get("requested_url", result["url"]), result["url"])
+            )
 
     def _invoke(
         self, name: str, operation: Callable[[], dict], *, acquire=False
@@ -372,12 +391,7 @@ class MvpTools:
                     result["focus_matched"] = warning is None
                 if warning:
                     result["reading_warning"] = warning
-                with (self.directory / "sources.jsonl").open(
-                    "a", encoding="utf-8"
-                ) as handle:
-                    handle.write(json.dumps(result, ensure_ascii=False) + "\n")
-                self.sources.append(result)
-                self.allowed_urls.update((url, page.url))
+                self._remember_source(result)
                 return result
 
         return self._invoke("read_source", operation, acquire=True)

@@ -34,7 +34,9 @@ def _stop_process_tree(process):
         process.kill()
 
 
-def supervise_process(command, directory, deadline_seconds):
+def supervise_process(
+    command, directory, deadline_seconds, *, report_filename="2026-10-13-GOOG.md"
+):
     """Enforce an absolute wall-clock limit on the complete worker process tree."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -73,7 +75,7 @@ def supervise_process(command, directory, deadline_seconds):
         "execution_path": "mvp",
         "run_id": directory.name,
         "status": "partial" if (directory / "report.draft.md").exists() else "failed",
-        "report_written": (directory / "2026-10-13-GOOG.md").exists(),
+        "report_written": (directory / report_filename).exists(),
         "quality_accepted": None,
         "error": {
             "code": "hard_deadline_exceeded" if expired else "worker_failed",

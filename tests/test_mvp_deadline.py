@@ -70,6 +70,26 @@ def test_supervisor_returns_completed_result_without_rewriting_it(tmp_path):
     )
 
 
+def test_supervisor_retains_the_fund_report_written_before_a_worker_stall(tmp_path):
+    from research_agent.runtime.supervisor import supervise_process
+
+    command = _script(
+        tmp_path,
+        """
+        import pathlib, sys, time
+        directory = pathlib.Path(sys.argv[1])
+        (directory / "report.md").write_text("# Saved fund report", encoding="utf-8")
+        (directory / "report.draft.md").write_text("# Saved draft", encoding="utf-8")
+        time.sleep(60)
+    """,
+    )
+    result = supervise_process(
+        command, tmp_path, deadline_seconds=2.0, report_filename="report.md"
+    )
+    assert result["status"] == "partial" and result["report_written"]
+    assert (tmp_path / "report.md").read_text(encoding="utf-8") == "# Saved fund report"
+
+
 def test_supervisor_terminates_hung_worker_without_draft_as_failed(tmp_path):
     from research_agent.runtime.supervisor import supervise_process
 

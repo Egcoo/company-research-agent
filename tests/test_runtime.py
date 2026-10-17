@@ -93,3 +93,24 @@ def test_source_list_retains_order_deduplication_and_original_format():
         "- [年报\\[2025\\] 附注](<https://example.test/annual>)；发布日期：2026-01-28；读取日期：2026-10-09。\n"
         "- [季报](<https://example.test/quarter>)；发布日期：未确认；读取日期：2026-10-09。\n"
     )
+
+
+def test_source_list_normalizes_utc_and_local_read_times_to_the_same_china_date():
+    sources = [
+        {
+            "url": "https://example.test/a",
+            "title": "A",
+            "published_at": None,
+            "retrieved_at": "2026-10-15T16:20:00+00:00",
+        },
+        {
+            "url": "https://example.test/b",
+            "title": "B",
+            "published_at": None,
+            "retrieved_at": "2026-10-16T00:20:00+08:00",
+        },
+    ]
+    text = _source_list(sources)
+    assert text.count("读取日期：2026-10-16") == 2
+    sources[0]["retrieved_at"] = "invalid"
+    assert "读取日期：未确认" in _source_list(sources)
