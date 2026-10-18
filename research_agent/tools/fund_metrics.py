@@ -240,10 +240,14 @@ def reconcile_benchmark_disclosure(rows, disclosure):
                 else min(end.day, monthrange(year, month)[1])
             )
             wanted = date(year, month, day)
-        elif item["period"] == "自基金合同生效起至今" and disclosure.get(
-            "inception_date"
+        elif item["period"].startswith("自") and (
+            disclosure.get("selected_share_class_start_date")
+            or disclosure.get("inception_date")
         ):
-            wanted = date.fromisoformat(disclosure["inception_date"])
+            wanted = date.fromisoformat(
+                disclosure.get("selected_share_class_start_date")
+                or disclosure["inception_date"]
+            )
         else:
             continue
         first = bisect_right(dates, wanted.isoformat()) - 1

@@ -56,6 +56,43 @@ FUND_TYPES = {
             "Do not apply feeder-specific fee exclusions or invent a target ETF."
         ),
     },
+    "mixed": {
+        "periodic_readings": (
+            ("基金净值表现", 10000),
+            ("基金经理", 6500),
+            ("报告期内基金的投资策略和业绩表现", 8000),
+            ("投资组合报告", 14000),
+            ("销售服务费", 5000),
+        ),
+        "research_focus": (
+            "Read the mixed fund's contractual stock/bond/cash limits separately from actual "
+            "disclosed allocation. A composite benchmark's weights are not portfolio weights. "
+            "Use the current and previous periodic report to examine allocation, concentration "
+            "and style changes; a single snapshot cannot establish style stability. Read manager "
+            "tenure and actual investment process. Select peers with similar mandates and risk "
+            "exposure rather than assuming an index ETF is the default alternative. Verify "
+            "the selected share class's start date and never borrow the A class's longer history."
+        ),
+        "synthesis_focus": (
+            "Write a mixed-fund report, adapting section 5 to manager/process, allocation, style, "
+            "concentration, capacity and costs. Do not impose an index replication or tracking-error "
+            "target, invent a target ETF, or treat mixed as automatically balanced or low risk. "
+            "Distinguish contractual allocation ranges, actual allocation, and benchmark weights; "
+            "preserve whether percentages use total assets or net assets. Use dated current and "
+            "previous holdings, and acknowledge disclosure lag. Attribute manager commentary as "
+            "opinion; holdings alone cannot establish multi-year performance causality. "
+            "Report performance for the requested share class only: a later-added C class has "
+            "its own lifetime; unavailable three-year history stays unavailable. Parent/A-class "
+            "history may be explicitly labeled context but never presented as C-class performance. "
+            "benchmark_disclosures preserves official same-period benchmark returns, not a daily "
+            "benchmark series. Peer differences are not manager alpha or the official benchmark. "
+            "For section 8, use sourced contractual terms or directional research conditions; "
+            "do not manufacture allocation, drawdown, concentration or purchase thresholds."
+            " The application fills the canonical performance tables in section 6 from fund_data, "
+            "separating latest NAV metrics and official same-period benchmark returns; explain "
+            "their implications without comparing different dates or duplicating those tables."
+        ),
+    },
 }
 
 SUPPORTED_FUND_TYPES = tuple(FUND_TYPES)

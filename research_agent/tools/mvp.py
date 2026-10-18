@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from langchain_core.tools import StructuredTool
 
 from research_agent.config import ConfigurationError, ResearchError
+from research_agent.fund_types import SUPPORTED_FUND_TYPES
 from research_agent.tools.research import discover_recent_sec_sources
 from research_agent.tools.sec import SecClient, _validate_url
 from research_agent.tools.source_dates import source_dates
@@ -38,7 +39,9 @@ _ERROR_MESSAGES = {
     "unsupported_content_type": "This source format is unsupported; seek readable HTML or record a gap.",
     "fund_identity_mismatch": "Fund code, name, or share class conflicts with the requested product.",
     "fund_identity_unverified": "The requested fund identity could not be verified; do not write an investment recommendation.",
-    "fund_type_unsupported": "This MVP supports passive index, ETF feeder and enhanced index funds only.",
+    "fund_type_unsupported": "Supported fund routes are: "
+    + ", ".join(SUPPORTED_FUND_TYPES)
+    + ".",
     "fund_history_short": "There is not enough comparable NAV history before the cutoff.",
     "fund_return_conflict": "NAV and return data conflict; do not invent or fill the missing performance.",
     "pdf_no_text": "This PDF has no readable text layer; OCR is unavailable.",

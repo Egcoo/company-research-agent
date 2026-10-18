@@ -65,7 +65,9 @@ def parse_profile(html, code):
     category = fields.get("基金类型", "")
     identity_name = name + " " + fields.get("基金全称", "")
     kind = (
-        "enhanced_index"
+        "unsupported"
+        if "FOF" in (identity_name + category).upper() or "基金中基金" in identity_name
+        else "enhanced_index"
         if "增强" in identity_name and ("指数" in identity_name or "指数" in category)
         else "etf_feeder"
         if re.search(r"ETF.*联接|联接.*ETF", name, re.I)
@@ -73,6 +75,8 @@ def parse_profile(html, code):
         if "ETF" in name.upper()
         else "passive_index"
         if "指数" in category and "股票" in category
+        else "mixed"
+        if category.startswith("混合")
         else "unsupported"
     )
     fees = {}
@@ -162,12 +166,33 @@ def parse_nav(text, code, as_of):
     return name, rows, raw
 
 
-def parse_documents(payload, code, as_of, limit=4):
+def _report_period_hint(title):
+    year = re.search(r"(20\d{2})年", title)
+    if not year:
+        return None
+    year = int(year.group(1))
+    if re.search(r"中期|半年度|上半年", title):
+        return date(year, 6, 30).isoformat()
+    quarter = re.search(r"第?([一二三四1-4])季度", title)
+    if quarter:
+        number = (
+            "一二三四".find(quarter.group(1)) + 1
+            if quarter.group(1) in "一二三四"
+            else int(quarter.group(1))
+        )
+        month, day = ((3, 31), (6, 30), (9, 30), (12, 31))[number - 1]
+        return date(year, month, day).isoformat()
+    if "年度" in title:
+        return date(year, 12, 31).isoformat()
+    return None
+
+
+def parse_documents(payload, code, as_of, limit=4, *, include_previous=False):
     """Select dated research disclosures, leaving their URLs as discovery until read."""
     rows = payload.get("Data") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
         raise ResearchError("fund_data_invalid", "The disclosure list is invalid.")
-    groups = {}
+    groups, periodic = {}, []
     for item in rows:
         if str(item.get("FUNDCODE")) != code:
             continue
@@ -199,14 +224,37 @@ def parse_documents(payload, code, as_of, limit=4):
             "url": f"https://pdf.dfcfw.com/pdf/H2_{identity}_1.pdf",
             "coverage": "discovery_only",
         }
+        if group == "periodic":
+            record["report_period_hint"] = _report_period_hint(title)
+            periodic.append(record)
         if group not in groups or published.isoformat() > groups[group]["published_at"]:
             groups[group] = record
+    if include_previous and "periodic" in groups:
+        latest = groups["periodic"]
+        earlier = [
+            item
+            for item in periodic
+            if item["published_at"] < latest["published_at"]
+            and item.get("report_period_hint")
+            and latest.get("report_period_hint")
+            and item["report_period_hint"] < latest["report_period_hint"]
+        ]
+        if earlier:
+            groups["previous_periodic"] = {
+                **max(
+                    earlier,
+                    key=lambda item: (item["report_period_hint"], item["published_at"]),
+                ),
+                "previous_periodic": True,
+            }
     return [
-        groups[key] for key in ("periodic", "summary", "prospectus") if key in groups
+        groups[key]
+        for key in ("periodic", "summary", "prospectus", "previous_periodic")
+        if key in groups
     ][:limit]
 
 
-def parse_benchmark_disclosure(text, selected_class):
+def parse_benchmark_disclosure(text, selected_class, *, include_tracking_risk=True):
     """Read an explicitly labeled share-class performance table and risk disclosures."""
     result = {"periods": [], "gaps": []}
     for key, pattern in (
@@ -227,9 +275,30 @@ def parse_benchmark_disclosure(text, selected_class):
                 ).isoformat()
             except ValueError:
                 pass
-    definition = re.search(r"(?m)^业绩比较基准\s*([^\n]+)", text)
+    definition = re.search(
+        r"(?ms)^业绩比较基准(?!收益率)[ \t]*\n?(.{1,600}?)(?=^风险收益特征|^\d+\.\d|^§|\Z)",
+        text,
+    )
     if definition and re.search(r"指数|利率|收益率", definition.group(1)):
-        result["definition"] = definition.group(1).strip()
+        result["definition"] = re.sub(r"\s+", "", definition.group(1))
+    additions = re.finditer(
+        rf"自\s*(20\d{{2}})\s*年\s*(\d{{1,2}})\s*月\s*(\d{{1,2}})\s*日[^。]{{0,60}}?(?:增加|增设)[^。]{{0,60}}?{re.escape(selected_class)}\s*类基金份额",
+        text,
+    )
+    starts_for_class = set()
+    for addition in additions:
+        try:
+            starts_for_class.add(
+                date(*(int(value) for value in addition.groups())).isoformat()
+            )
+        except ValueError:
+            pass
+    if len(starts_for_class) == 1:
+        result["selected_share_class_start_date"] = starts_for_class.pop()
+    elif starts_for_class:
+        result["gaps"].append(
+            "Conflicting dates for the selected share class's inception."
+        )
     starts = [
         item
         for item in re.finditer(r"(?m)^3\.2(?:\.1)?[ \t]+基金(?:份额)?净值[^\n]*", text)
@@ -254,7 +323,7 @@ def parse_benchmark_disclosure(text, selected_class):
             section = re.sub(r"\s+", "", body[heading.end() : stop])
             section = section.replace("－", "-").replace("−", "-").replace("％", "%")
             pattern = (
-                r"(过去(?:三个月|六个月|一年|三年|五年|七年|十年)|自基金合同生效起至今)"
+                rf"(过去(?:三个月|六个月|一年|三年|五年|七年|十年)|自基金合同生效起至今|自增加{re.escape(selected_class)}类基金份额起至今)"
                 + r"([+-]?\d+(?:\.\d+)?)%" * 6
             )
             for found in re.finditer(pattern, section):
@@ -312,11 +381,11 @@ def parse_benchmark_disclosure(text, selected_class):
         )
     }
     risk = {}
-    if target:
+    if target and include_tracking_risk:
         risk["tracking_error_target_pct"] = float(target.group(1))
-    if len(actual) == 1:
+    if len(actual) == 1 and include_tracking_risk:
         risk["reported_tracking_error_pct"] = actual.pop()
-    elif actual:
+    elif actual and include_tracking_risk:
         result["gaps"].append(
             "Conflicting reported tracking errors; inspect the original disclosure."
         )
@@ -337,3 +406,39 @@ def parse_benchmark_disclosure(text, selected_class):
         "Official benchmark daily data is unavailable; information ratio and independently calculated official-benchmark tracking error are not computed. Return-table standard-deviation differences are not tracking error."
     )
     return result
+
+
+def parse_share_class_fees(text, selected_name, selected_class, *, summary=False):
+    """Read dated A/C fees, using an explicit A-class block in combined summaries."""
+    compact = re.sub(r"\s+", "", text)
+    fees = {"A": {}, "C": {}}
+    for pattern in (
+        r"C类基金份额的销售服务费年费率为(\d+(?:\.\d+)?)%",
+        r"销售服务费C(\d+(?:\.\d+)?)%",
+    ):
+        found = re.search(pattern, compact)
+        if found:
+            fees["C"]["sales_service"] = float(found.group(1))
+            break
+    if re.search(r"A类基金份额[^。]{0,100}不收取销售服务费", compact):
+        fees["A"]["sales_service"] = 0
+    if not summary:
+        return fees
+    position = compact.find("基金销售相关费用")
+    section = compact[position:] if position >= 0 else compact
+    a_name = re.sub(r"[A-Z]$", "A", re.sub(r"\s+", "", selected_name))
+    c_name = re.sub(r"[A-Z]$", "C", re.sub(r"\s+", "", selected_name))
+    a_position = section.find(a_name) if a_name else -1
+    if a_position < 0 and selected_class != "A":
+        return fees
+    section = section[a_position:] if a_position >= 0 else section
+    c_position = section.find(c_name, len(a_name)) if c_name else -1
+    if c_position >= 0:
+        section = section[:c_position]
+    first = section.find("申购费")
+    last = section.find("赎回费", first)
+    if first >= 0 and last > first:
+        rates = re.findall(r"(\d+(?:\.\d+)?)%", section[first:last])
+        if rates:
+            fees["A"]["maximum_subscription"] = max(float(rate) for rate in rates)
+    return fees

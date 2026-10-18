@@ -212,3 +212,94 @@ def insert_fund_costs(markdown, fund_data, headings):
         + "\n\n"
         + markdown[position:]
     )
+
+
+def insert_mixed_performance(markdown, fund_data, code, share_class, headings):
+    """Keep latest NAV metrics separate from dated official-benchmark tables."""
+    data = fund_data or {}
+    metrics = data.get("nav_metrics", {}).get(code)
+    start, stop = f"## 6. {headings[5]}", f"## 7. {headings[6]}"
+    if not metrics or start not in markdown or stop not in markdown:
+        return markdown
+    begin = markdown.index(start) + len(start)
+    end = markdown.index(stop, begin)
+    body = markdown[begin:end]
+    periods = metrics["periods"]
+    history = periods["available_history"]
+
+    def percent(value):
+        return f"{value:.4f}%" if value is not None else "N.A."
+
+    lines = [
+        "### 所选份额绩效与基准口径",
+        "",
+        f"**最新净值口径：{share_class}类，截至{metrics['latest_nav_date']}。**",
+        "",
+        f"| 指标 | {share_class}类 | 期间与口径 |",
+        "|---|---:|---|",
+        f"| 单位净值 | {metrics['latest_unit_nav']:g}元 | {metrics['latest_nav_date']} |",
+    ]
+    for label, key in (
+        ("近1年收益", "one_year"),
+        ("近3年收益", "three_years"),
+        ("所选份额可用历史收益", "available_history"),
+    ):
+        item = periods.get(key)
+        lines.append(
+            f"| {label} | {percent(item['return_pct']) if item else 'N.A.'} | "
+            + (
+                f"{item['start_date']}→{item['end_date']} |"
+                if item
+                else "所选份额可比历史不足，不借用其他份额 |"
+            )
+        )
+    dates = f"{history['start_date']}→{history['end_date']}"
+    recovery = history["recovery_date"] or (
+        "尚未恢复" if history["max_drawdown_pct"] < 0 else "无已观察回撤"
+    )
+    lines += [
+        f"| 年化收益（可用历史） | {percent(history['annualized_return_pct'])} | {dates}；按日历天数年化 |",
+        f"| 最大回撤（可用历史） | {percent(history['max_drawdown_pct'])} | 峰{history['drawdown_peak_date']}→谷{history['drawdown_trough_date']}；日频净值 |",
+        f"| 恢复前高日期 | {recovery} | 截至{history['end_date']} |",
+        f"| 年化波动率（可用历史） | {percent(history['annualized_volatility_pct'])} | {dates}；样本标准差×√252 |",
+        "| 夏普比率 | N.A. | 未取得经核实的无风险利率序列 |",
+        "",
+        f"净值及计算依据：[所选份额净值]({metrics['source_url']})。",
+        "",
+    ]
+    for disclosure in data.get("benchmark_disclosures", []):
+        if disclosure.get("share_class") != share_class or not disclosure.get(
+            "periods"
+        ):
+            continue
+        report_end = disclosure["report_end_date"]
+        lines += [
+            f"**官方披露口径：截至{report_end}。** 基准：{disclosure.get('definition', '见原报告')}；[报告]({disclosure['source_url']})。",
+            "",
+            f"| 期间 | {share_class}类收益 | 官方基准收益 | 收益差（百分点） |",
+            "|---|---:|---:|---:|",
+        ]
+        for item in disclosure["periods"]:
+            baseline = item.get("nav_reconciliation", {}).get("start_date")
+            label = item["period"] + (
+                f"（{baseline}→{report_end}）" if baseline else f"（截至{report_end}）"
+            )
+            lines.append(
+                f"| {label} | {percent(item['fund_return_pct'])} | {percent(item['benchmark_return_pct'])} | {item['return_difference_pp']:.4f} |"
+            )
+        lines.append("")
+    lines += [
+        "**比较边界：** 最新净值指标不能与较早报告的基准收益直接相减。官方对照表仅支持表内同期间比较；缺少基准日序列的最新期间保留缺口。",
+        "",
+    ]
+    canonical = "\n".join(lines)
+    if canonical in body:
+        return markdown
+    tables = list(
+        re.finditer(r"(?m)^\|[^\n]+\|[ \t]*\n(?:^\|[^\n]*\|[ \t]*(?:\n|$))+", body)
+    )
+    for table in reversed(tables):
+        header = table.group(0).splitlines()[0]
+        if "指标" in header and ("基金" in header or "基准" in header):
+            body = body[: table.start()] + body[table.end() :]
+    return markdown[:begin] + "\n\n" + canonical + "\n" + body.lstrip() + markdown[end:]

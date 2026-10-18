@@ -18,6 +18,7 @@ from research_agent.tools.fund_data import (
     parse_documents,
     parse_nav,
     parse_profile,
+    parse_share_class_fees,
     share_class,
 )
 from research_agent.tools.fund_metrics import (
@@ -200,7 +201,7 @@ class FundTools(MvpTools):
                 other = fund_code(comparison_code)
                 compared = compare_nav(rows, load(other))
                 compared.update(fund_code=selected, comparison_code=other)
-                if self.fund_type == "enhanced_index":
+                if self.fund_type in {"enhanced_index", "mixed"}:
                     compared["comparison_role"] = (
                         "comparison fund or ETF proxy; not the official benchmark "
                         "and not a designated target ETF"
@@ -234,7 +235,13 @@ class FundTools(MvpTools):
                     f"?fundcode={selected}&pageIndex=1&pageSize=50&type=0"
                 )
                 payload = self.fetcher.get_json(url, headers=_HEADERS)
-                records = parse_documents(payload, selected, self.as_of)
+                records = parse_documents(
+                    payload,
+                    selected,
+                    self.as_of,
+                    include_previous=self.fund_type == "mixed"
+                    and selected == self.ticker,
+                )
                 for item in records:
                     self._discovered[item["url"]] = {
                         **item,
@@ -242,10 +249,24 @@ class FundTools(MvpTools):
                         "source_type": "fund_disclosure",
                     }
                 self._documents[selected] = records
-            return {
-                "documents": self._documents[selected][:limit],
+            result = {
+                "documents": [
+                    item
+                    for item in self._documents[selected]
+                    if not item.get("previous_periodic")
+                ][:limit],
                 "coverage": "discovery_only",
             }
+            if self.fund_type == "mixed" and selected == self.ticker:
+                result["previous_periodic"] = next(
+                    (
+                        item
+                        for item in self._documents[selected]
+                        if item.get("previous_periodic")
+                    ),
+                    None,
+                )
+            return result
 
         return self._invoke("get_fund_documents", operation, acquire=True)
 
@@ -333,17 +354,27 @@ class FundTools(MvpTools):
             )
             disclosure = None
             if (
-                self.fund_type == "enhanced_index"
+                self.fund_type in {"enhanced_index", "mixed"}
                 and metadata.get("fund_code") == self.ticker
                 and metadata.get("kind") == "periodic"
                 and url not in self._benchmark_disclosures
             ):
-                disclosure = parse_benchmark_disclosure("\n".join(pages), self.share_class)
+                disclosure = parse_benchmark_disclosure(
+                    "\n".join(pages),
+                    self.share_class,
+                    include_tracking_risk=self.fund_type == "enhanced_index",
+                )
                 report_end = disclosure.get("report_end_date")
                 if report_end and date.fromisoformat(report_end) > self.as_of:
-                    raise ResearchError("future_source", "The performance period is after cutoff.")
-                disclosure.update(source_url=page.url, published_at=published.isoformat())
-                reconcile_benchmark_disclosure(self._series.get(self.ticker, []), disclosure)
+                    raise ResearchError(
+                        "future_source", "The performance period is after cutoff."
+                    )
+                disclosure.update(
+                    source_url=page.url, published_at=published.isoformat()
+                )
+                reconcile_benchmark_disclosure(
+                    self._series.get(self.ticker, []), disclosure
+                )
             result = self._source(
                 page,
                 metadata.get("title", "基金披露 PDF"),
@@ -354,7 +385,9 @@ class FundTools(MvpTools):
             )
             if disclosure is not None:
                 self._benchmark_disclosures[url] = disclosure
-                self.fund_data["benchmark_disclosures"] = list(self._benchmark_disclosures.values())
+                self.fund_data["benchmark_disclosures"] = list(
+                    self._benchmark_disclosures.values()
+                )
                 self._append_note(
                     "### 程序提取与复算：官方基准期间表现及跟踪风险\n\n"
                     + json.dumps(disclosure, ensure_ascii=False)
@@ -365,23 +398,14 @@ class FundTools(MvpTools):
                 "summary",
             }:
                 text = " ".join(pages)
-                compact = re.sub(r"\s+", "", text)
-                c_fee = re.search(
-                    r"C类基金份额的销售服务费年费率为(\d+(?:\.\d+)?)%", compact
+                fees = parse_share_class_fees(
+                    text,
+                    self._profiles.get(self.ticker, {}).get("name", ""),
+                    self.share_class,
+                    summary=metadata.get("kind") == "summary",
                 )
-                if c_fee:
-                    self._dated_fees["C"]["sales_service"] = float(c_fee.group(1))
-                if re.search(r"A类基金份额[^。]{0,100}不收取销售服务费", compact):
-                    self._dated_fees["A"]["sales_service"] = 0
-                if metadata.get("kind") == "summary" and self.share_class == "A":
-                    position = compact.find("申购费")
-                    stop = compact.find("赎回费", position)
-                    if position >= 0 and stop > position:
-                        rates = re.findall(r"(\d+(?:\.\d+)?)%", compact[position:stop])
-                        if rates:
-                            self._dated_fees["A"]["maximum_subscription"] = max(
-                                float(rate) for rate in rates
-                            )
+                for label, values in fees.items():
+                    self._dated_fees[label].update(values)
                 if any(self._dated_fees.values()):
                     self._fee_sources.append(
                         {"url": page.url, "disclosure_date": published.isoformat()}
@@ -521,8 +545,16 @@ class FundTools(MvpTools):
                         self.fund_data["gaps"].append(
                             {"document_focus": focus, "error": reading["error"]}
                         )
+        if self.fund_type == "mixed":
+            previous = disclosures.get("previous_periodic")
+            if previous:
+                self.read_source(previous["url"], focus="投资组合报告", max_chars=12000)
+            else:
+                self.fund_data["gaps"].append(
+                    "No previous periodic report was discovered; do not infer allocation/style stability from one holdings snapshot."
+                )
         self._share_costs()
-        if self.fund_type == "enhanced_index" and not any(
+        if self.fund_type in {"enhanced_index", "mixed"} and not any(
             item.get("periods") for item in self._benchmark_disclosures.values()
         ):
             self.fund_data["gaps"].append(

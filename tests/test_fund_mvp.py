@@ -15,7 +15,11 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from research_agent import mvp, runner
 from research_agent.config import ResearchBudget, ResearchError, Settings
-from research_agent.runtime.reporting import check_report, insert_fund_costs
+from research_agent.runtime.reporting import (
+    check_report,
+    insert_fund_costs,
+    insert_mixed_performance,
+)
 from research_agent.skill_loader import load_skill
 from research_agent.tools.fund import FundTools
 from research_agent.tools.fund_data import CHINA
@@ -54,8 +58,10 @@ def fund_case(tmp_path):
             "etf_feeder": "ETF联接",
             "passive_index": "指数",
             "enhanced_index": "指数增强",
+            "mixed": "混合",
         }[kind]
         name = f"示例沪深300{suffix}{actual_class}"
+        category = "混合型-灵活" if kind == "mixed" else "指数型-股票"
 
         def respond(request):
             url = "https://" + request.headers["Host"] + request.url.raw_path.decode()
@@ -67,7 +73,7 @@ def fund_case(tmp_path):
                     text=(
                         f"<table><tr><th>基金代码</th><td>{code}（前端）</td>"
                         f"<th>基金简称</th><td>{name}</td></tr>"
-                        "<tr><th>基金类型</th><td>指数型-股票</td>"
+                        f"<tr><th>基金类型</th><td>{category}</td>"
                         "<th>基金管理人</th><td>示例基金</td></tr></table>"
                     ),
                 )
@@ -161,6 +167,7 @@ def fund_case(tmp_path):
         ("etf_feeder", "110020"),
         ("passive_index", "000051"),
         ("enhanced_index", "010736"),
+        ("mixed", "021528"),
     ],
 )
 def test_fund_branch_keeps_one_model_and_passes_canonical_data_to_fund_synthesis(
@@ -306,10 +313,15 @@ def test_enhanced_etf_comparison_is_not_labeled_as_a_designated_target(fund_case
 
 
 @pytest.mark.parametrize(
-    "kind,code", [("passive_index", "000051"), ("enhanced_index", "010736")]
+    "kind,code,share",
+    [
+        ("passive_index", "000051", "A"),
+        ("enhanced_index", "010736", "A"),
+        ("mixed", "021528", "C"),
+    ],
 )
 def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
-    tmp_path, monkeypatch, capfd, kind, code
+    tmp_path, monkeypatch, capfd, kind, code, share
 ):
     calls = []
     monkeypatch.setattr(
@@ -328,7 +340,7 @@ def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
                 "--fund-type",
                 kind,
                 "--share-class",
-                "a",
+                share.lower(),
                 "--market",
                 "CN",
                 "--as-of",
@@ -339,7 +351,7 @@ def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
         )
         == 0
     )
-    assert calls[0]["ticker"] == code and calls[0]["share_class"] == "A"
+    assert calls[0]["ticker"] == code and calls[0]["share_class"] == share
     assert calls[0]["target_type"] == "fund" and calls[0]["fund_type"] == kind
 
 
@@ -364,10 +376,15 @@ def test_unsupported_fund_cli_scope_stops_before_provider_access(monkeypatch, ex
 
 
 @pytest.mark.parametrize(
-    "kind,code", [("etf_feeder", "110020"), ("enhanced_index", "010736")]
+    "kind,code,share",
+    [
+        ("etf_feeder", "110020", "A"),
+        ("enhanced_index", "010736", "A"),
+        ("mixed", "021528", "C"),
+    ],
 )
 def test_fund_inputs_roundtrip_into_the_existing_worker(
-    tmp_path, monkeypatch, kind, code
+    tmp_path, monkeypatch, kind, code, share
 ):
     captured = {}
 
@@ -389,7 +406,7 @@ def test_fund_inputs_roundtrip_into_the_existing_worker(
         output_dir=tmp_path,
         target_type="fund",
         fund_type=kind,
-        share_class="A",
+        share_class=share,
     )
     assert captured["inputs"]["target_type"] == "fund"
     assert "references/fund-memo-template.md" in captured["inputs"]["skill_files"]
@@ -408,7 +425,7 @@ def test_fund_inputs_roundtrip_into_the_existing_worker(
     assert captured["worker_kwargs"] == {
         "target_type": "fund",
         "fund_type": kind,
-        "share_class": "A",
+        "share_class": share,
     }
     assert captured["ran"]
 
@@ -573,3 +590,159 @@ def test_ac_cost_scenarios_use_actual_fees_and_reject_unverified_share_relations
             ]
         },
     )["errors"]
+
+
+def test_mixed_c_keeps_its_history_and_composite_benchmark_after_research_failure(
+    fund_case, monkeypatch
+):
+    from research_agent.tools import fund as fund_module
+
+    text = """示例基金021528
+基金合同生效日2015年6月29日
+本基金自2024年5月28日起增加收取销售服务费的C类基金份额。
+报告期末(2026年6月30日)
+业绩比较基准
+沪深300指数收益率×55%+上证国债指数收益率×45%
+风险收益特征
+混合基金。
+3.2.1 基金份额净值增长率与基准比较
+示例成长混合A
+过去三年 555% 3% 20% 0.6% 535% 2.4%
+示例成长混合C
+过去六个月 50% 3% 5% 0.6% 45% 2.4%
+自增加C类基金份额起至今 200% 3% 20% 0.6% 180% 2.4%
+3.2.2 净值图
+"""
+    monkeypatch.setattr(fund_module, "read_pdf", lambda body, budget: ([text], 1))
+    rows = [
+        {
+            "x": int(
+                datetime.fromisoformat(day).replace(tzinfo=CHINA).timestamp() * 1000
+            ),
+            "y": nav,
+            "equityReturn": None,
+            "unitMoney": "",
+        }
+        for day, nav in [
+            ("2024-05-28", 1),
+            ("2025-12-31", 2),
+            ("2026-06-30", 3),
+            ("2026-10-08", 1.2),
+        ]
+    ]
+
+    def research(messages):
+        assert "mixed fund's contractual" in messages[0].content
+        raise RuntimeError("research interrupted")
+
+    def synthesis(messages):
+        packet = json.loads(messages[1].content)
+        assert packet["fund_type"] == "mixed" and packet["share_class"] == "C"
+        data = packet["fund_data"]
+        metrics = data["nav_metrics"]["021528"]
+        assert metrics["first_available_date"] == "2024-05-28"
+        assert "three_years" not in metrics["periods"]
+        disclosure = data["benchmark_disclosures"][0]
+        assert disclosure["inception_date"] == "2015-06-29"
+        assert disclosure["selected_share_class_start_date"] == "2024-05-28"
+        assert disclosure["definition"].endswith("×45%")
+        assert not disclosure["tracking_risk"] and "target_etf" not in data
+        assert (
+            disclosure["periods"][-1]["nav_reconciliation"]["start_date"]
+            == "2024-05-28"
+        )
+        return AIMessage(content=fund_report("021528", "mixed"))
+
+    run, model, seen = fund_case(
+        [research, synthesis],
+        code="021528",
+        kind="mixed",
+        requested_class="C",
+        actual_class="C",
+        report_text=text,
+        nav_rows=rows,
+    )
+    result = run.run()
+    assert result["status"] == "generated" and result["quality_accepted"] is None
+    assert result["errors"][0]["stage"] == "research" and model.i == 2
+    assert (run.directory / "report.md").exists() and (
+        run.directory / "nav-021528.json"
+    ).exists()
+    saved = json.loads((run.directory / "fund_data.json").read_text(encoding="utf-8"))
+    assert (
+        saved["benchmark_disclosures"][0]["selected_share_class_start_date"]
+        == "2024-05-28"
+    )
+    assert not any("sec.gov" in url for url in seen)
+
+
+def test_mixed_performance_tables_do_not_pair_different_cutoffs(fund_case):
+    rows = [
+        {
+            "x": int(
+                datetime.fromisoformat(day).replace(tzinfo=CHINA).timestamp() * 1000
+            ),
+            "y": nav,
+            "equityReturn": None,
+            "unitMoney": "",
+        }
+        for day, nav in [
+            ("2024-05-28", 1),
+            ("2025-10-08", 1.874),
+            ("2026-06-30", 5.698),
+            ("2026-10-08", 3.324),
+        ]
+    ]
+    run, _, _ = fund_case(
+        [],
+        code="021528",
+        kind="mixed",
+        requested_class="C",
+        actual_class="C",
+        nav_rows=rows,
+    )
+    tools = run.source_tools
+    tools.get_fund_profile()
+    tools.get_nav_history()
+    url = "https://pdf.dfcfw.com/pdf/H2_AN202608311828748047_1.pdf"
+    tools.fund_data["benchmark_disclosures"] = [
+        {
+            "share_class": "C",
+            "report_end_date": "2026-06-30",
+            "definition": "股指55%+债指45%",
+            "source_url": url,
+            "periods": [
+                {
+                    "period": "过去一年",
+                    "fund_return_pct": 445.79,
+                    "benchmark_return_pct": 14.78,
+                    "return_difference_pp": 431.01,
+                    "nav_reconciliation": {"start_date": "2025-06-30"},
+                }
+            ],
+        }
+    ]
+    bundle = load_skill(kind="fund", fund_type="mixed")
+    heading = f"## 6. {bundle.report_headings[5]}"
+    bad = "| 指标 | 基金（C类） | 官方基准 |\n|---|---|---|\n| 近1年收益 | 77.37% | 14.78% |\n"
+    markdown = fund_report("021528", "mixed").replace(heading, heading + "\n\n" + bad)
+    output = insert_mixed_performance(
+        markdown, tools.fund_data, "021528", "C", bundle.report_headings
+    )
+    assert bad not in output
+    assert "| 近1年收益 | 77.3746% | 2025-10-08→2026-10-08 |" in output
+    assert "445.7900% | 14.7800% | 431.0100" in output
+    assert "过去一年（2025-06-30→2026-06-30）" in output
+    assert "| 近3年收益 | N.A." in output
+    assert output.count("### 所选份额绩效与基准口径") == 1
+    assert (
+        insert_mixed_performance(
+            output, tools.fund_data, "021528", "C", bundle.report_headings
+        )
+        == output
+    )
+    boundary = f"## 7. {bundle.report_headings[6]}"
+    assert output.split(boundary, 1)[1] == markdown.split(boundary, 1)[1]
+    assert not check_report(output, bundle.report_headings, tools.allowed_urls | {url})[
+        "errors"
+    ]

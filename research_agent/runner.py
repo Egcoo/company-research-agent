@@ -72,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
             or arguments.scope not in {None, "full"}
         ):
             parser.error(
-                "Fund MVP requires --fund-code, --fund-type passive_index/etf_feeder/enhanced_index, "
+                "Fund MVP requires --fund-code, --fund-type "
+                + "/".join(SUPPORTED_FUND_TYPES)
+                + ", "
                 "--share-class, CN market and full scope."
             )
     elif (

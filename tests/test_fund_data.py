@@ -14,6 +14,7 @@ from research_agent.tools.fund_data import (
     parse_documents,
     parse_nav,
     parse_profile,
+    parse_share_class_fees,
     share_class,
 )
 from research_agent.tools.fund_metrics import (
@@ -197,7 +198,7 @@ def test_disclosures_filter_future_dates_and_remain_discovery_only():
     "name,category,expected",
     [
         ("示例沪深300指数精选增强A", "指数型-股票", "enhanced_index"),
-        ("示例回报增强混合A", "混合型-偏股", "unsupported"),
+        ("示例回报增强混合A", "混合型-偏股", "mixed"),
         ("示例收益增强债券A", "债券型-混合债", "unsupported"),
     ],
 )
@@ -309,3 +310,98 @@ def test_conflicting_return_rows_do_not_hide_an_independent_tracking_risk(
     assert all(row["period"] != "过去三个月" for row in result["periods"])
     assert result["tracking_risk"]["target_exceeded"]
     assert any("conflicting" in gap for gap in result["gaps"])
+
+
+@pytest.mark.parametrize(
+    "category", ["混合型-灵活", "混合型-偏股", "混合型-偏债", "混合型-平衡"]
+)
+def test_mixed_categories_are_enabled_without_accepting_bond_or_fof(category):
+    def html(value):
+        return f"<table><tr><th>基金代码</th><td>021528</td><th>基金简称</th><td>示例成长混合C</td></tr><tr><th>基金类型</th><td>{value}</td></tr></table>"
+
+    assert parse_profile(html(category), "021528")["fund_type"] == "mixed"
+    for value in ("债券型-混合债", "FOF-混合型", "混合型-FOF"):
+        assert parse_profile(html(value), "021528")["fund_type"] == "unsupported"
+
+
+def test_previous_document_uses_distinct_reporting_period_not_publication_date():
+    records = [
+        {"FUNDCODE": "021528", "TITLE": title, "PUBLISHDATE": day, "ID": identity}
+        for title, day, identity in [
+            ("示例基金2026年中期报告", "2026-08-29", "AN202608291828682176"),
+            ("示例基金2026年第2季度报告", "2026-07-21", "AN202607211827195457"),
+            ("示例基金2026年第1季度报告", "2026-04-22", "AN202604221820000001"),
+            ("示例基金2026年第3季度报告", "2026-10-30", "AN202610301820000001"),
+        ]
+    ]
+    selected = parse_documents(
+        {"Data": records}, "021528", date(2026, 10, 16), include_previous=True
+    )
+    assert len(selected) == 2
+    assert selected[0]["report_period_hint"] == "2026-06-30"
+    assert (
+        selected[1]["previous_periodic"]
+        and selected[1]["report_period_hint"] == "2026-03-31"
+    )
+    assert len(parse_documents({"Data": records}, "021528", date(2026, 10, 16))) == 1
+
+
+def test_c_class_history_and_wrapped_benchmark_do_not_inherit_parent_history():
+    text = """基金合同生效日2015年6月29日
+本基金自2024年5月28日起增加收取销售服务费的C类基金份额。
+报告期末(2026年6月30日)
+业绩比较基准
+沪深300指数收益率×55%+上证国债指数收益
+率×45%
+风险收益特征
+混合基金。
+3.2.1 基金份额净值增长率与基准比较
+示例成长混合A
+过去三年 555% 3% 20% 0.6% 535% 2.4%
+示例成长混合C
+过去六个月 50% 3% 5% 0.6% 45% 2.4%
+过去三年 - - - - - -
+自增加C类
+基金份额起
+至今 200% 3% 20% 0.6% 180% 2.4%
+3.2.2 净值图
+对照增强基金年化跟踪误差不超过6%。
+"""
+    disclosure = parse_benchmark_disclosure(text, "C", include_tracking_risk=False)
+    assert disclosure["definition"] == "沪深300指数收益率×55%+上证国债指数收益率×45%"
+    assert disclosure["inception_date"] == "2015-06-29"
+    assert disclosure["selected_share_class_start_date"] == "2024-05-28"
+    assert len(disclosure["periods"]) == 2 and not disclosure["tracking_risk"]
+    rows = [
+        {"date": day, "nav": value, "daily_return_pct": None, "event": ""}
+        for day, value in [("2024-05-28", 1), ("2025-12-31", 2), ("2026-06-30", 3)]
+    ]
+    result = reconcile_benchmark_disclosure(rows, disclosure)
+    assert result["periods"][-1]["nav_reconciliation"]["start_date"] == "2024-05-28"
+    assert all(
+        row["nav_reconciliation"]["consistent_with_rounding"]
+        for row in result["periods"]
+    )
+
+
+def test_c_class_combined_summary_preserves_actual_a_subscription_and_c_fee():
+    text = """基金销售相关费用
+示例成长混合A
+申购费 1.50% 1.00% 0.50%
+赎回费 1.50% 0.75% 0.50% 0.25% 0.00%
+示例成长混合C
+赎回费 1.50% 0.50% 0.00%
+基金运作相关费用
+销售服务费 C 0.40%
+A类基金份额不收取销售服务费。
+"""
+    fees = parse_share_class_fees(text, "示例成长混合C", "C", summary=True)
+    assert fees == {
+        "A": {"sales_service": 0, "maximum_subscription": 1.5},
+        "C": {"sales_service": 0.4},
+    }
+    c_only = "示例成长混合C 申购费0.00% 赎回费1.50% 销售服务费C0.40%"
+    assert (
+        "maximum_subscription"
+        not in parse_share_class_fees(c_only, "示例成长混合C", "C", summary=True)["A"]
+    )

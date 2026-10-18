@@ -12,6 +12,7 @@ from research_agent.runtime.reporting import (
     _source_list,
     check_report,
     insert_fund_costs,
+    insert_mixed_performance,
     normalize_markdown,
 )
 
@@ -132,6 +133,10 @@ def synthesize_report(
         report = normalize_markdown(content, headings)
         if target_type == "fund":
             report = insert_fund_costs(report, fund_data, headings)
+            if fund_type == "mixed":
+                report = insert_mixed_performance(
+                    report, fund_data, ticker, share_class, headings
+                )
         checks = check_report(report, headings, allowed_urls)
         emit_event({"type": "report_check", "attempt": attempt + 1, **checks})
         if not checks["errors"]:
