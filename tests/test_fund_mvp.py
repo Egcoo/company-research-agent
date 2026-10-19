@@ -18,7 +18,7 @@ from research_agent.config import ResearchBudget, ResearchError, Settings
 from research_agent.runtime.reporting import (
     check_report,
     insert_fund_costs,
-    insert_mixed_performance,
+    insert_fund_performance,
 )
 from research_agent.skill_loader import load_skill
 from research_agent.tools.fund import FundTools
@@ -50,6 +50,8 @@ def fund_case(tmp_path):
         actual_class="A",
         report_text=None,
         nav_rows=None,
+        disclosure_records=None,
+        pdf_texts=None,
     ):
         settings = Settings()
         budget = ResearchBudget(settings)
@@ -59,9 +61,12 @@ def fund_case(tmp_path):
             "passive_index": "指数",
             "enhanced_index": "指数增强",
             "mixed": "混合",
+            "bond": "债券",
         }[kind]
         name = f"示例沪深300{suffix}{actual_class}"
-        category = "混合型-灵活" if kind == "mixed" else "指数型-股票"
+        category = {"mixed": "混合型-灵活", "bond": "债券型-长债"}.get(
+            kind, "指数型-股票"
+        )
 
         def respond(request):
             url = "https://" + request.headers["Host"] + request.url.raw_path.decode()
@@ -122,7 +127,20 @@ def fund_case(tmp_path):
                     if report_text
                     else []
                 )
-                return httpx.Response(200, json={"Data": records})
+                return httpx.Response(
+                    200,
+                    json={
+                        "Data": records
+                        if disclosure_records is None
+                        else disclosure_records
+                    },
+                )
+            if pdf_texts and url in pdf_texts:
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "application/pdf"},
+                    content=b"%PDF-" + pdf_texts[url].encode(),
+                )
             if (
                 url == "https://pdf.dfcfw.com/pdf/H2_AN202608311828748047_1.pdf"
                 and report_text
@@ -168,6 +186,7 @@ def fund_case(tmp_path):
         ("passive_index", "000051"),
         ("enhanced_index", "010736"),
         ("mixed", "021528"),
+        ("bond", "006178"),
     ],
 )
 def test_fund_branch_keeps_one_model_and_passes_canonical_data_to_fund_synthesis(
@@ -318,6 +337,7 @@ def test_enhanced_etf_comparison_is_not_labeled_as_a_designated_target(fund_case
         ("passive_index", "000051", "A"),
         ("enhanced_index", "010736", "A"),
         ("mixed", "021528", "C"),
+        ("bond", "006178", "C"),
     ],
 )
 def test_cli_fund_arguments_preserve_code_and_class_and_explicit_route(
@@ -381,6 +401,7 @@ def test_unsupported_fund_cli_scope_stops_before_provider_access(monkeypatch, ex
         ("etf_feeder", "110020", "A"),
         ("enhanced_index", "010736", "A"),
         ("mixed", "021528", "C"),
+        ("bond", "006178", "C"),
     ],
 )
 def test_fund_inputs_roundtrip_into_the_existing_worker(
@@ -726,7 +747,7 @@ def test_mixed_performance_tables_do_not_pair_different_cutoffs(fund_case):
     heading = f"## 6. {bundle.report_headings[5]}"
     bad = "| 指标 | 基金（C类） | 官方基准 |\n|---|---|---|\n| 近1年收益 | 77.37% | 14.78% |\n"
     markdown = fund_report("021528", "mixed").replace(heading, heading + "\n\n" + bad)
-    output = insert_mixed_performance(
+    output = insert_fund_performance(
         markdown, tools.fund_data, "021528", "C", bundle.report_headings
     )
     assert bad not in output
@@ -736,7 +757,7 @@ def test_mixed_performance_tables_do_not_pair_different_cutoffs(fund_case):
     assert "| 近3年收益 | N.A." in output
     assert output.count("### 所选份额绩效与基准口径") == 1
     assert (
-        insert_mixed_performance(
+        insert_fund_performance(
             output, tools.fund_data, "021528", "C", bundle.report_headings
         )
         == output
@@ -746,3 +767,153 @@ def test_mixed_performance_tables_do_not_pair_different_cutoffs(fund_case):
     assert not check_report(output, bundle.report_headings, tools.allowed_urls | {url})[
         "errors"
     ]
+
+
+def test_bond_c_reuses_runtime_and_retains_dividends_prior_report_and_fee_conflict(
+    fund_case, monkeypatch
+):
+    from research_agent.tools import fund as fund_module
+
+    current = """示例债券基金006178
+基金合同生效日2018年8月31日
+本基金自2023年10月27日起增加E类基金份额，原A类基金份额和C类基金份额不变。
+报告期末(2026年6月30日)
+业绩比较基准
+中证综合债指数收益率
+风险收益特征
+债券基金。
+3.2.1 基金份额净值增长率与基准比较
+示例债券A
+过去六个月 99.00% 0.1% 2.00% 0.1% 97.00% 0.00%
+示例债券C
+过去六个月 4.55% 0.1% 2.00% 0.1% 2.55% 0.00%
+3.2.2 净值图
+4.1 基金经理 顾某
+4.4 报告期内基金的投资策略和业绩表现
+采用回购和信用策略，不保证收益。
+6.4.10 销售服务费
+A类基金份额不收取销售服务费。
+C类基金份额日销售服务费=前一日C类基金份额基金资产净值×0.01%/当年天数；
+6.4.13.2 信用风险
+含银行二级资本债，不等同于国债。
+6.4.13.4 市场风险
+利率风险及回购融资风险；未披露组合久期。
+7 投资组合报告
+债券占总资产98%，占净资产123%；口径不同。
+"""
+    previous = """示例债券基金006178
+报告期2026年1月1日至2026年3月31日
+5 投资组合报告
+上期债券组合。
+"""
+    summary = """示例债券基金（C类份额）基金产品资料概要更新
+份额类别子代码006178
+基金销售相关费用
+申购费0.00% 赎回费1.50%
+基金运作相关费用
+销售服务费0.10%
+"""
+    records = [
+        {"FUNDCODE": "006178", "TITLE": title, "PUBLISHDATE": day, "ID": identity}
+        for title, day, identity in [
+            ("示例基金2026年中期报告", "2026-08-29", "AN202608291828683168"),
+            ("示例基金产品资料概要更新", "2026-05-29", "AN202605291822991498"),
+            ("示例基金2026年第1季度报告", "2026-04-21", "AN202604211821355994"),
+        ]
+    ]
+    urls = [f"https://pdf.dfcfw.com/pdf/H2_{item['ID']}_1.pdf" for item in records]
+    pdf_texts = dict(zip(urls, [current, summary, previous], strict=True))
+    monkeypatch.setattr(
+        fund_module, "read_pdf", lambda body, budget: ([body[5:].decode()], 1)
+    )
+    rows = [
+        {
+            "x": int(
+                datetime.fromisoformat(day).replace(tzinfo=CHINA).timestamp() * 1000
+            ),
+            "y": nav,
+            "equityReturn": growth,
+            "unitMoney": event,
+        }
+        for day, nav, growth, event in [
+            ("2018-08-31", 1, None, ""),
+            ("2019-03-15", 1.02, None, ""),
+            ("2019-03-18", 0.99, 0, "分红：每10份派现金0.30元"),
+            ("2025-12-31", 1.1, None, ""),
+            ("2026-03-31", 1.12, None, ""),
+            ("2026-06-30", 1.15, None, ""),
+            ("2026-10-08", 1.17, None, ""),
+        ]
+    ]
+
+    def research(messages):
+        instructions = messages[0].content
+        for focus in (
+            "subordinated bank",
+            "repo funding",
+            "interest-rate sensitivity",
+            "sum all bonds from",
+            "neither prohibits all purchases",
+        ):
+            assert focus in instructions
+        raise RuntimeError("research interrupted")
+
+    def synthesis(messages):
+        packet = json.loads(messages[1].content)
+        assert packet["fund_type"] == "bond" and packet["share_class"] == "C"
+        data = packet["fund_data"]
+        assert "target_etf" not in data
+        assert data["nav_metrics"]["006178"]["distribution_event_dates"] == [
+            "2019-03-18"
+        ]
+        benchmark = data["benchmark_disclosures"][0]
+        assert "selected_share_class_start_date" not in benchmark
+        assert not benchmark["tracking_risk"]
+        assert benchmark["periods"][0]["fund_return_pct"] == 4.55
+        assert benchmark["periods"][0]["nav_reconciliation"]["consistent_with_rounding"]
+        assert len(data["fee_disclosures"]) == 2
+        assert any("Conflicting dated C-class fees" in gap for gap in data["gaps"])
+        assert "share_class_costs" not in data
+        assert any(
+            "上期债券组合" in source["text"] for source in packet["read_sources"]
+        )
+        assert "historical return" in messages[0].content.lower()
+        assert "do not multiply it by leverage again" in messages[0].content.replace(
+            "\n", " "
+        )
+        assert "does not make buying universally impossible" in messages[0].content
+        return AIMessage(content=fund_report("006178", "bond"))
+
+    run, model, seen = fund_case(
+        [research, synthesis],
+        code="006178",
+        kind="bond",
+        requested_class="C",
+        actual_class="C",
+        nav_rows=rows,
+        disclosure_records=records,
+        pdf_texts=pdf_texts,
+    )
+    result = run.run()
+    assert result["status"] == "generated" and result["quality_accepted"] is None
+    assert model.i == 2 and result["errors"][0]["stage"] == "research"
+    report = (run.directory / "report.md").read_text(encoding="utf-8")
+    assert "**最新净值口径：C类，截至2026-10-08。**" in report
+    assert "**官方披露口径：截至2026-06-30。**" in report
+    assert "未逐笔独立复原现金分红" in report
+    assert report.count("### 所选份额绩效与基准口径") == 1
+    assert all(url in seen for url in urls)
+    assert not any("sec.gov" in url for url in seen)
+    assert (run.directory / "nav-006178.json").exists()
+    assert not (run.directory / "sources").exists()
+    run.source_tools._share_costs()
+    assert "share_class_costs" not in run.source_tools.fund_data
+
+
+def test_bond_share_class_mismatch_stops_before_model(fund_case):
+    run, model, _ = fund_case(
+        [], code="006178", kind="bond", requested_class="C", actual_class="A"
+    )
+    result = run.run()
+    assert result["status"] == "failed" and model.i == 0
+    assert not (run.directory / "report.md").exists()

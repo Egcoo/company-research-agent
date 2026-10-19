@@ -93,6 +93,71 @@ FUND_TYPES = {
             "their implications without comparing different dates or duplicating those tables."
         ),
     },
+    "bond": {
+        "periodic_readings": (
+            ("基金净值表现", 10000),
+            ("基金经理", 6000),
+            ("报告期内基金的投资策略和业绩表现", 6500),
+            ("投资组合报告", 12000),
+            ("信用风险", 8500),
+            ("市场风险", 12000),
+            ("销售服务费", 5000),
+        ),
+        "research_focus": (
+            "Read the bond fund's dated mandate first: pure bonds versus permitted stock, "
+            "convertible/exchangeable bond and ABS exposure. Separate contractual limits from "
+            "actual current and previous holdings. Examine rates/credit mix, credit ratings "
+            "and unrated explanations, issuer concentration, subordinated bank capital/perpetual "
+            "debt, repo funding, liquidity/redemption terms and manager tenure. Read disclosed "
+            "interest-rate sensitivity and balance-sheet risk notes, not only the top-five bonds. "
+            "Keep total-assets and net-assets denominators distinct; bond weight above 100% "
+            "of NAV is possible and is not itself a breach. Use calculate for ratios from "
+            "disclosed figures with the same date and scope. If duration, yield-to-maturity, "
+            "credit spreads or complete rating data are missing, retain gaps; do not infer "
+            "them from maturity buckets, NAV volatility or a few holdings. Reconcile the "
+            "requested share class's distributions, official period returns and dated fee terms. "
+            "Conflicting fee disclosures remain a gap until a dated change notice resolves them. "
+            "Choose comparable bond mandates/duration/credit budgets for peers; an equity ETF "
+            "is not a default substitute. Do not add a target ETF or index tracking-error target."
+            " A single bond's weight is not aggregate issuer exposure: sum all bonds from "
+            "that issuer or retain the issuer-concentration gap. A purchase cap constrains "
+            "daily execution but neither prohibits all purchases nor proves a capacity problem. "
+            "Rate/credit conditions described in an old periodic report are historical context; "
+            "obtain dated current evidence or leave current market positioning unresolved."
+        ),
+        "synthesis_focus": (
+            "Write a bond-fund report: coupon/carry, interest-rate moves, credit spread changes "
+            "and repo financing are potential return drivers, not a verified attribution of "
+            "historical excess return. A bond fund is not a deposit or a capital-guaranteed product. "
+            "Explain interest-rate, credit/default, subordination/non-redemption, leverage, "
+            "funding and redemption risks using read evidence. AAA does not mean risk-free; "
+            "unrated does not automatically mean poor credit. Keep policy bank debt distinct "
+            "from commercial-bank capital bonds. Preserve dates, portfolio/share-class scope "
+            "and total-assets versus NAV denominators. If deriving gross assets/NAV or repo/NAV, "
+            "show the same-date inputs and calculation; do not call either portfolio duration. "
+            "An estimate derived from fund-NAV interest-rate sensitivity is an approximate "
+            "fund-level sensitivity, not an officially disclosed bond-portfolio duration. "
+            "It already reflects the fund's asset/liability exposures; do not multiply it by "
+            "leverage again. State this limitation wherever using such an estimate. "
+            "An official rate-shock scenario is conditional, not a forecast or guaranteed loss cap; "
+            "do not extrapolate it to different shocks without a model. Missing duration, YTM "
+            "or current spreads stay gaps. Historical return/annualization is not current carry "
+            "or expected future yield, and a low unit NAV is not cheapness. Report only the "
+            "selected share class's history and disclose the distribution-event approximation. "
+            "The application fills section 6 performance tables, separating latest NAV metrics "
+            "from dated official same-period benchmark returns; explain rather than duplicate "
+            "them. No equity DCF/PE, invented target ETF or tracking-error target. Dated fee "
+            "conflicts prohibit a definitive A/C preference or an invented break-even horizon. "
+            "Use sourced redemption rules and directional reassessment conditions; do not "
+            "invent rate, NAV, drawdown or holding-period purchase thresholds."
+            " Never label the largest single-bond weight as the largest issuer weight without "
+            "aggregating that issuer's other bonds. A daily purchase cap is a transaction limit; "
+            "without the user's planned amount it does not make buying universally impossible "
+            "or prove that fund capacity caused the restriction. Market commentary dated to "
+            "an earlier report must not become a claim about rates/spreads at the cutoff. "
+            "If current timing evidence is missing, state that gap and keep the conclusion conditional."
+        ),
+    },
 }
 
 SUPPORTED_FUND_TYPES = tuple(FUND_TYPES)

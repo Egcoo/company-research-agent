@@ -214,7 +214,7 @@ def insert_fund_costs(markdown, fund_data, headings):
     )
 
 
-def insert_mixed_performance(markdown, fund_data, code, share_class, headings):
+def insert_fund_performance(markdown, fund_data, code, share_class, headings):
     """Keep latest NAV metrics separate from dated official-benchmark tables."""
     data = fund_data or {}
     metrics = data.get("nav_metrics", {}).get(code)
@@ -267,6 +267,11 @@ def insert_mixed_performance(markdown, fund_data, code, share_class, headings):
         f"净值及计算依据：[所选份额净值]({metrics['source_url']})。",
         "",
     ]
+    if metrics.get("distribution_event_dates"):
+        lines += [
+            "收益及回撤按分红再投资口径估算：普通日使用单位净值比值，分红/拆分日使用数据商公布的日收益率；未逐笔独立复原现金分红，结果存在该项近似。单位净值涨幅不等于含分红总收益。",
+            "",
+        ]
     for disclosure in data.get("benchmark_disclosures", []):
         if disclosure.get("share_class") != share_class or not disclosure.get(
             "periods"

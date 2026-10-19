@@ -199,7 +199,7 @@ def test_disclosures_filter_future_dates_and_remain_discovery_only():
     [
         ("示例沪深300指数精选增强A", "指数型-股票", "enhanced_index"),
         ("示例回报增强混合A", "混合型-偏股", "mixed"),
-        ("示例收益增强债券A", "债券型-混合债", "unsupported"),
+        ("示例收益增强债券A", "债券型-混合债", "bond"),
     ],
 )
 def test_enhancement_label_requires_an_index_product(name, category, expected):
@@ -315,13 +315,33 @@ def test_conflicting_return_rows_do_not_hide_an_independent_tracking_risk(
 @pytest.mark.parametrize(
     "category", ["混合型-灵活", "混合型-偏股", "混合型-偏债", "混合型-平衡"]
 )
-def test_mixed_categories_are_enabled_without_accepting_bond_or_fof(category):
+def test_mixed_categories_are_enabled_without_accepting_fof(category):
     def html(value):
         return f"<table><tr><th>基金代码</th><td>021528</td><th>基金简称</th><td>示例成长混合C</td></tr><tr><th>基金类型</th><td>{value}</td></tr></table>"
 
     assert parse_profile(html(category), "021528")["fund_type"] == "mixed"
-    for value in ("债券型-混合债", "FOF-混合型", "混合型-FOF"):
+    for value in ("FOF-混合型", "混合型-FOF"):
         assert parse_profile(html(value), "021528")["fund_type"] == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "category,expected",
+    [
+        ("债券型-长债", "bond"),
+        ("债券型-中短债", "bond"),
+        ("债券型-混合债", "bond"),
+        ("债券型-可转债", "bond"),
+        ("FOF-债券型", "unsupported"),
+        ("债券型-FOF", "unsupported"),
+        ("货币型", "unsupported"),
+    ],
+)
+def test_bond_category_uses_profile_not_name_and_keeps_fof_unsupported(
+    category, expected
+):
+    html = f"<table><tr><th>基金代码</th><td>006178</td><th>基金简称</th><td>示例稳达C</td></tr><tr><th>基金全称</th><td>示例稳达债券型证券投资基金</td><th>基金类型</th><td>{category}</td></tr></table>"
+    profile = parse_profile(html, "006178")
+    assert profile["fund_type"] == expected and profile["share_class"] == "C"
 
 
 def test_previous_document_uses_distinct_reporting_period_not_publication_date():
@@ -405,3 +425,70 @@ A类基金份额不收取销售服务费。
         "maximum_subscription"
         not in parse_share_class_fees(c_only, "示例成长混合C", "C", summary=True)["A"]
     )
+
+
+def test_adding_e_class_does_not_reset_original_c_class_history():
+    text = """基金合同生效日2018年8月31日
+本基金自2023年10月27日起增加E类基金份额，原A类基金份额和C类基金份额不变。
+报告期末(2026年6月30日)
+业绩比较基准
+中证综合债指数收益率
+风险收益特征
+债券基金。
+3.2.1 基金份额净值增长率与基准比较
+示例稳达C
+自基金合同生效起至今 33.95% 0.09% 40.05% 0.07% -6.10% 0.02%
+3.2.2 净值图
+"""
+    disclosure = parse_benchmark_disclosure(text, "C", include_tracking_risk=False)
+    assert "selected_share_class_start_date" not in disclosure
+    assert not disclosure["tracking_risk"]
+    rows = [
+        {"date": day, "nav": value, "daily_return_pct": None, "event": ""}
+        for day, value in [
+            ("2018-08-31", 1),
+            ("2023-10-27", 1.15),
+            ("2026-06-30", 1.3395),
+        ]
+    ]
+    reconciliation = reconcile_benchmark_disclosure(rows, disclosure)["periods"][0][
+        "nav_reconciliation"
+    ]
+    assert reconciliation["start_date"] == "2018-08-31"
+    assert reconciliation["consistent_with_rounding"]
+    e_class = parse_benchmark_disclosure(text, "E", include_tracking_risk=False)
+    assert e_class["selected_share_class_start_date"] == "2023-10-27"
+
+
+def test_benchmark_label_in_objective_does_not_capture_the_whole_strategy():
+    text = """投资目标
+力求实现超越
+业绩比较基准
+的收益。
+投资策略
+运用利率策略。
+业绩比较基准 中证综合债指数收益率
+风险收益特征 债券型基金。
+"""
+    assert parse_benchmark_disclosure(text, "C")["definition"] == "中证综合债指数收益率"
+
+
+def test_c_only_bond_summary_and_dated_fee_formula_remain_class_specific():
+    summary = """示例稳达债券型证券投资基金（C类份额）基金产品资料概要更新
+基金代码006177 份额类别子代码006178
+基金销售相关费用
+赎回费1.50% 0.10% 0.00%
+申购费：该费率为0%。
+基金运作相关费用
+管理费0.20% 托管费0.05% 销售服务费0.10%
+"""
+    fees = parse_share_class_fees(summary, "示例稳达C", "C", summary=True)
+    assert fees == {"A": {}, "C": {"sales_service": 0.1}}
+    periodic = """本基金A类基金份额不收取销售服务费。
+C类基金份额日销售服务费=前一日C类基金份额基金资产净值×0.01%/当年天数；
+E类基金份额日销售服务费=前一日E类基金份额基金资产净值×0.20%/当年天数。
+"""
+    assert parse_share_class_fees(periodic, "示例稳达C", "C") == {
+        "A": {"sales_service": 0},
+        "C": {"sales_service": 0.01},
+    }

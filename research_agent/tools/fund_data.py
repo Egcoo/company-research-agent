@@ -77,6 +77,8 @@ def parse_profile(html, code):
         if "指数" in category and "股票" in category
         else "mixed"
         if category.startswith("混合")
+        else "bond"
+        if category.startswith("债券")
         else "unsupported"
     )
     fees = {}
@@ -275,14 +277,16 @@ def parse_benchmark_disclosure(text, selected_class, *, include_tracking_risk=Tr
                 ).isoformat()
             except ValueError:
                 pass
-    definition = re.search(
-        r"(?ms)^业绩比较基准(?!收益率)[ \t]*\n?(.{1,600}?)(?=^风险收益特征|^\d+\.\d|^§|\Z)",
+    definitions = re.finditer(
+        r"(?ms)^业绩比较基准(?!收益率)[ \t]*\n?(.{1,600}?)(?=^风险收益特征|^投资策略|^投资目标|^\d+\.\d|^§|\Z)",
         text,
     )
-    if definition and re.search(r"指数|利率|收益率", definition.group(1)):
-        result["definition"] = re.sub(r"\s+", "", definition.group(1))
+    for definition in definitions:
+        if re.search(r"指数|利率|收益率", definition.group(1)):
+            result["definition"] = re.sub(r"\s+", "", definition.group(1))
+            break
     additions = re.finditer(
-        rf"自\s*(20\d{{2}})\s*年\s*(\d{{1,2}})\s*月\s*(\d{{1,2}})\s*日[^。]{{0,60}}?(?:增加|增设)[^。]{{0,60}}?{re.escape(selected_class)}\s*类基金份额",
+        rf"自\s*(20\d{{2}})\s*年\s*(\d{{1,2}})\s*月\s*(\d{{1,2}})\s*日[^。]{{0,60}}?(?:增加|增设)[^。A-Z]{{0,60}}?{re.escape(selected_class)}\s*类基金份额",
         text,
     )
     starts_for_class = set()
@@ -415,6 +419,7 @@ def parse_share_class_fees(text, selected_name, selected_class, *, summary=False
     for pattern in (
         r"C类基金份额的销售服务费年费率为(\d+(?:\.\d+)?)%",
         r"销售服务费C(\d+(?:\.\d+)?)%",
+        r"C类基金份额日销售服务费=前一日C类基金份额基金资产净值[×*](\d+(?:\.\d+)?)%",
     ):
         found = re.search(pattern, compact)
         if found:
@@ -424,6 +429,12 @@ def parse_share_class_fees(text, selected_name, selected_class, *, summary=False
         fees["A"]["sales_service"] = 0
     if not summary:
         return fees
+    if selected_class == "C" and re.search(
+        r"[（(]C类(?:基金)?份额[）)]基金产品资料概要", compact[:400]
+    ):
+        found = re.search(r"销售服务费(\d+(?:\.\d+)?)%", compact)
+        if found:
+            fees["C"]["sales_service"] = float(found.group(1))
     position = compact.find("基金销售相关费用")
     section = compact[position:] if position >= 0 else compact
     a_name = re.sub(r"[A-Z]$", "A", re.sub(r"\s+", "", selected_name))

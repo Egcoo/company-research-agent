@@ -52,6 +52,7 @@ class FundTools(MvpTools):
         self._benchmark_disclosures = {}
         self._dated_fees = {"A": {}, "C": {}}
         self._fee_sources = []
+        self._fee_conflicts = False
 
     def _source(self, page, title, text, **extra):
         result = {
@@ -201,7 +202,7 @@ class FundTools(MvpTools):
                 other = fund_code(comparison_code)
                 compared = compare_nav(rows, load(other))
                 compared.update(fund_code=selected, comparison_code=other)
-                if self.fund_type in {"enhanced_index", "mixed"}:
+                if self.fund_type in {"enhanced_index", "mixed", "bond"}:
                     compared["comparison_role"] = (
                         "comparison fund or ETF proxy; not the official benchmark "
                         "and not a designated target ETF"
@@ -239,7 +240,7 @@ class FundTools(MvpTools):
                     payload,
                     selected,
                     self.as_of,
-                    include_previous=self.fund_type == "mixed"
+                    include_previous=self.fund_type in {"mixed", "bond"}
                     and selected == self.ticker,
                 )
                 for item in records:
@@ -257,7 +258,7 @@ class FundTools(MvpTools):
                 ][:limit],
                 "coverage": "discovery_only",
             }
-            if self.fund_type == "mixed" and selected == self.ticker:
+            if self.fund_type in {"mixed", "bond"} and selected == self.ticker:
                 result["previous_periodic"] = next(
                     (
                         item
@@ -354,7 +355,7 @@ class FundTools(MvpTools):
             )
             disclosure = None
             if (
-                self.fund_type in {"enhanced_index", "mixed"}
+                self.fund_type in {"enhanced_index", "mixed", "bond"}
                 and metadata.get("fund_code") == self.ticker
                 and metadata.get("kind") == "periodic"
                 and url not in self._benchmark_disclosures
@@ -404,9 +405,32 @@ class FundTools(MvpTools):
                     self.share_class,
                     summary=metadata.get("kind") == "summary",
                 )
-                for label, values in fees.items():
-                    self._dated_fees[label].update(values)
-                if any(self._dated_fees.values()):
+                fee_records = self.fund_data.setdefault("fee_disclosures", [])
+                if any(fees.values()) and not any(
+                    item["source_url"] == page.url for item in fee_records
+                ):
+                    for previous in fee_records:
+                        for label, values in fees.items():
+                            prior = previous["fees_percent"].get(label, {})
+                            if any(
+                                key in prior and prior[key] != value
+                                for key, value in values.items()
+                            ):
+                                self._fee_conflicts = True
+                                self.fund_data["gaps"].append(
+                                    f"Conflicting dated {label}-class fees in "
+                                    f"{previous['source_url']} and {page.url}; "
+                                    "a dated fee-change notice is needed. Do not infer an A/C preference."
+                                )
+                    fee_records.append(
+                        {
+                            "source_url": page.url,
+                            "published_at": published.isoformat(),
+                            "fees_percent": fees,
+                        }
+                    )
+                    for label, values in fees.items():
+                        self._dated_fees[label].update(values)
                     self._fee_sources.append(
                         {"url": page.url, "disclosure_date": published.isoformat()}
                     )
@@ -440,6 +464,8 @@ class FundTools(MvpTools):
 
     def _share_costs(self):
         """Calculate conditional A/C costs from actual profile fees, not return differences."""
+        if self._fee_conflicts:
+            return
         profiles = self.fund_data["profiles"]
         if not profiles[self.ticker].get("full_name"):
             return
@@ -545,7 +571,7 @@ class FundTools(MvpTools):
                         self.fund_data["gaps"].append(
                             {"document_focus": focus, "error": reading["error"]}
                         )
-        if self.fund_type == "mixed":
+        if self.fund_type in {"mixed", "bond"}:
             previous = disclosures.get("previous_periodic")
             if previous:
                 self.read_source(previous["url"], focus="投资组合报告", max_chars=12000)
@@ -554,7 +580,7 @@ class FundTools(MvpTools):
                     "No previous periodic report was discovered; do not infer allocation/style stability from one holdings snapshot."
                 )
         self._share_costs()
-        if self.fund_type in {"enhanced_index", "mixed"} and not any(
+        if self.fund_type in {"enhanced_index", "mixed", "bond"} and not any(
             item.get("periods") for item in self._benchmark_disclosures.values()
         ):
             self.fund_data["gaps"].append(
