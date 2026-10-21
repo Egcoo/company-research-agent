@@ -73,9 +73,12 @@ def test_retained_python_has_no_imports_of_retired_modules():
             ), path
 
 
-def test_project_metadata_and_active_files_expose_only_mvp():
+def test_project_metadata_exposes_mvp_and_independent_review_without_legacy_entries():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["scripts"] == {"deepequity": "research_agent.runner:main"}
+    assert project["project"]["scripts"] == {
+        "deepequity": "research_agent.runner:main",
+        "deepequity-review": "research_agent.review:main",
+    }
     assert (
         not {"studio", "notebook"}
         & project["project"].get("optional-dependencies", {}).keys()

@@ -33,6 +33,7 @@ dev = [
 
 [project.scripts]
 deepequity = "research_agent.runner:main"
+deepequity-review = "research_agent.review:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -48,6 +49,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
 research_agent = [
+    "review_rules/*.md",
     "skills/investment-master/SKILL.md",
     "skills/investment-master/LICENSE",
     "skills/investment-master/manifest.json",
