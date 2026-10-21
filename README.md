@@ -198,6 +198,36 @@ data/runs/mvp/<run_id>/
 
 **`generated` 不代表研究完整或结论正确。** `quality_accepted` 默认为空；还需检查 `result.json` 中的错误、报告内容及重要缺口。单次研究错误也可能在保留材料后继续生成报告。
 
+## 独立评审
+
+报告生成后，可以另行启动一次模型审阅。**生成报告不会自动触发判卷**；你只需选择那次研究的目录，程序会读取材料、调用模型并保存简短意见。例如审阅已有的 021528 C 类运行：
+
+```powershell
+uv run --locked deepequity-review "data/runs/mvp-mixed-fund-acceptance/mvp/cd24ab55c38e46de973b91ab7066b6d8" --env-file .env
+```
+
+把引号中的路径换成你要审阅的研究目录。也可以使用 `uv run --locked python -m research_agent.review "研究目录" --env-file .env`。环境变量已配置时，省略 `--env-file`；不会自动寻找或读取 `.env`。默认使用当前配置的模型，可用 `--model anthropic:模型名` 仅覆盖这次判卷。
+
+程序自动选择目录中的 `report.md` 或唯一的日期命名最终报告，兼容当前股票分支的固定文件名；有多篇候选时，用 `--report 文件名.md` 明确选择。不会把草稿、笔记或先前的审阅结果当作最终报告。
+
+判卷使用 `inputs.json` 中的原任务、实际读取的 `sources.jsonl`、`notes.md`，以及基金的 `fund_data.json` 和所选份额的 `nav-代码.json`。原任务和最终报告必须存在；其他材料缺失时，会在审阅范围中明确记录。不会读取凭据文件、日志、已有人工验收/模型判卷意见，或其他对照基金的原始净值。来源去除完全重复的窗口；不静默截断正文。完整输入默认上限 400000 字符，超过时在调用模型前停止，可明确设置 `--max-input-chars`（最多 2000000）；字符上限不是 token 或金额预算。
+
+第一版**只调用一次模型、不绑定工具、不联网补充资料、不自动重试或修复**。关闭该次调用的 thinking，最多输出 2048 token，要求约 300—600 字、最多 5 个重要问题，区分明确错误、依据不足和无法核实。股票/基金规则分别位于 `research_agent/review_rules/stock.md` 和 `fund.md`。材料不足可以是合理结论，不会被强行填成事实；保存的指标和原始净值也不代表模型已完成独立程序复算。
+
+每次创建单独目录，保留原报告、来源和原来的 `result.json`：
+
+```text
+原研究目录/
++-- report.md
++-- inputs.json / sources.jsonl / ...
++-- reviews/
+    +-- <判卷时间与ID>/
+        +-- review.md          # 简短模型审阅意见
+        +-- result.json        # 模型、调用次数、token、材料哈希、规则哈希及覆盖范围
+```
+
+判卷的 `completed` 只代表成功取得并保存意见，**不等于人工质量验收，也不修改原来的 `quality_accepted`**。失败时保存错误与调用记录；输出被模型服务截断时只保存 `review.draft.md` 并标为 `partial`。这两个状态的命令退出码为 1。同一报告可以多次判卷，每次结果另存。
+
 ## 已做到什么，还有哪些限制
 
 当前已实现独立 MVP 执行链、股票五个研究工具、基金七个研究工具、来源和笔记持续保存、报告流式输出、一次 Markdown 修复，以及调用预算和进程总时限控制。
